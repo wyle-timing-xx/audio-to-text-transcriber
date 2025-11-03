@@ -81,7 +81,7 @@ class AudioTranscriber {
 
         // 输出到控制台
         if (this.config.logToConsole) {
-          console.log(`📝 ${transcript}`);
+          console.log(`${transcript}`);
         }
 
         // 保存到文件
