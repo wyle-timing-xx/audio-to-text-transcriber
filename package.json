@@ -1,0 +1,30 @@
+{
+  "name": "audio-to-text-transcriber",
+  "version": "1.0.0",
+  "description": "Real-time audio capture and transcription using Node.js + FFmpeg + Deepgram + BlackHole",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node src/test-audio.js"
+  },
+  "keywords": [
+    "audio",
+    "transcription",
+    "speech-to-text",
+    "deepgram",
+    "ffmpeg",
+    "blackhole",
+    "real-time"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@deepgram/sdk": "^3.8.2",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
