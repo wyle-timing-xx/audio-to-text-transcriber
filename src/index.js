@@ -10,7 +10,7 @@ dotenv.config();
 // 配置项
 const CONFIG = {
   deepgramApiKey: process.env.DEEPGRAM_API_KEY,
-  audioDevice: process.env.AUDIO_DEVICE || 'BlackHole 2ch:1',
+  audioDevice: process.env.AUDIO_DEVICE || ':1',
   language: process.env.LANGUAGE || 'zh',
   model: process.env.MODEL || 'nova-2',
   smartFormat: process.env.SMART_FORMAT === 'true',

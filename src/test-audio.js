@@ -22,7 +22,7 @@ listDevices.on('exit', () => {
   // 测试录音
   const testRecord = spawn('ffmpeg', [
     '-f', 'avfoundation',
-    '-i', `:${AUDIO_DEVICE}`,
+    '-i', `:1`,
     '-t', '5',  // 录制 5 秒
     '-acodec', 'pcm_s16le',
     '-ar', '16000',
