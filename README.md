@@ -1,13 +1,19 @@
 # 🎙️ Audio to Text Transcriber
 
-实时音频捕获和转录系统，使用 Node.js + FFmpeg + Deepgram + BlackHole 实现边采集边转换的语音识别。
+实时音频捕获和转录系统，使用 Node.js + FFmpeg + Deepgram + BlackHole 实现边采集边转换的语音识别，并支持与 AI 实时对话。
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
+
+[English](./README_EN.md) | 中文
 
 ## ✨ 特性
 
 - 🔴 **实时转录**：边采集边转换，无延迟处理
 - 🎯 **高精度识别**：基于 Deepgram Nova-2 AI 模型
 - 🌏 **多语言支持**：支持中文、英文等多种语言
-- 💾 **自动保存**：转录结果实时保存到文件
+- 💬 **AI 对话**：将转录文本发送给 AI（支持 OpenAI/Claude/Deepseek）获取实时回答
+- 💾 **自动保存**：转录结果和 AI 对话实时保存到文件
 - 📊 **时间戳**：每条转录都带有精确时间戳
 - 🎛️ **灵活配置**：通过环境变量轻松自定义
 
@@ -39,11 +45,18 @@ brew install blackhole-2ch
 > 4. 勾选你的扬声器和 BlackHole 2ch
 > 5. 将系统音频输出设置为这个多输出设备
 
-### 4. 获取 Deepgram API Key
+### 4. 获取必要的 API Key
 
+#### Deepgram API Key (必需)
 1. 访问 [Deepgram Console](https://console.deepgram.com/)
 2. 注册账号（首次注册赠送 $200 额度）
 3. 创建一个新的 API Key
+
+#### AI 提供商 API Key (可选，用于 AI 对话功能)
+根据你选择的 AI 提供商，获取相应的 API Key：
+- [OpenAI API Key](https://platform.openai.com/account/api-keys)
+- [Anthropic Claude API Key](https://console.anthropic.com/)
+- [Deepseek API Key](https://platform.deepseek.ai/)
 
 ## 🚀 快速开始
 
@@ -63,11 +76,16 @@ npm install
 cp .env.example .env
 ```
 
-编辑 `.env` 文件，添加你的 Deepgram API Key：
+编辑 `.env` 文件，添加你的 API Key：
 ```env
+# 必填项
 DEEPGRAM_API_KEY=your_deepgram_api_key_here
 AUDIO_DEVICE=BlackHole 2ch:1
 LANGUAGE=zh
+
+# AI 对话功能（可选）
+AI_PROVIDER=openai           # 选择: openai | claude | deepseek
+OPENAI_API_KEY=your_openai_key
 ```
 
 ### 4. 测试音频设备
@@ -86,7 +104,49 @@ npm start
 
 按 `Ctrl+C` 停止服务。
 
-## ⚙️ 配置选项
+## 🤖 AI 对话功能
+
+本项目支持将实时转录的语音转为文字后，自动发送给 AI 进行问答。支持三种主流 AI 提供商：
+
+- OpenAI (GPT-4o)
+- Anthropic (Claude)
+- Deepseek
+
+### 工作原理
+
+1. 系统捕获并转录你的语音
+2. 当检测到静默（默认 1.5 秒无语音）时，认为你的问题已完成
+3. 将完整问题发送给 AI 处理
+4. AI 的回答会实时流式显示在控制台并保存到文件
+
+### 配置 AI 对话
+
+在 `.env` 文件中设置以下参数：
+
+```env
+# 选择 AI 提供商
+AI_PROVIDER=openai           # openai | claude | deepseek
+
+# 对应提供商的 API Key
+OPENAI_API_KEY=your_openai_key
+CLAUDE_API_KEY=your_claude_key
+DEEPSEEK_API_KEY=your_deepseek_key
+DEEPSEEK_ENDPOINT=https://api.deepseek.your/qa
+
+# 静默检测时间（毫秒）- 判断用户是否已提问完毕
+SILENCE_TIMEOUT_MS=1500
+
+# AI 系统提示词
+AI_SYSTEM_PROMPT="你是智能问答助理，请简洁、准确地回答用户问题。"
+
+# 启用增量上报（实时将部分转录发送给 AI）
+PARTIAL_SEND=true
+
+# AI 对话输出文件
+QA_OUTPUT_FILE=transcripts/qa_output.txt
+```
+
+## ⚙️ 完整配置选项
 
 所有配置通过 `.env` 文件管理：
 
@@ -121,12 +181,24 @@ PUNCTUATE=true
 
 # 输出文件路径
 OUTPUT_FILE=transcripts/output.txt
+QA_OUTPUT_FILE=transcripts/qa_output.txt
 
 # 是否保存到文件
 SAVE_TO_FILE=true
 
 # 是否在控制台显示
 LOG_TO_CONSOLE=true
+
+# AI 配置
+AI_PROVIDER=openai           # openai | claude | deepseek
+OPENAI_API_KEY=your_openai_key
+CLAUDE_API_KEY=your_claude_key
+DEEPSEEK_API_KEY=your_deepseek_key
+DEEPSEEK_ENDPOINT=https://api.deepseek.your/qa
+
+AI_SYSTEM_PROMPT="你是智能问答助理，请简洁、准确地回答用户问题。"
+SILENCE_TIMEOUT_MS=1500
+PARTIAL_SEND=true
 ```
 
 ## 📁 项目结构
@@ -134,7 +206,7 @@ LOG_TO_CONSOLE=true
 ```
 audio-to-text-transcriber/
 ├── src/
-│   ├── index.js           # 主应用程序
+│   ├── index.js           # 主应用程序（转录+AI对话）
 │   └── test-audio.js      # 音频设备测试工具
 ├── transcripts/           # 转录输出目录（自动创建）
 ├── .env.example          # 环境变量模板
@@ -145,13 +217,21 @@ audio-to-text-transcriber/
 
 ## 🔧 工作原理
 
-这个项目就像一条**音频流水线**：
+### 语音转录流程
 
 1. **🎵 音频源** → 系统音频输出到 BlackHole 虚拟设备
 2. **🎤 FFmpeg** → 从 BlackHole 捕获音频流，转换为 PCM 格式
 3. **📡 WebSocket** → 将音频流实时传输到 Deepgram API
 4. **🤖 Deepgram AI** → 实时处理音频并返回文字
 5. **💾 存储** → 转录结果显示在控制台并保存到文件
+
+### AI 对话流程
+
+1. **🎙️ 语音输入** → 用户说话被转录为文字
+2. **⏱️ 静默检测** → 检测到用户停顿（默认 1.5 秒）判定为问题结束
+3. **🧠 AI 处理** → 将问题发送给选定的 AI 提供商（OpenAI/Claude/Deepseek）
+4. **💬 流式回答** → AI 回答实时流式显示在控制台
+5. **📝 记录保存** → 问答对话保存到文件（默认 `transcripts/qa_output.txt`）
 
 ### 技术栈
 
@@ -160,6 +240,7 @@ audio-to-text-transcriber/
 - **BlackHole**：macOS 虚拟音频设备
 - **Deepgram SDK**：实时语音识别 API
 - **WebSocket**：低延迟双向通信
+- **OpenAI/Claude/Deepseek API**：AI 对话能力
 
 ## 🎯 使用场景
 
@@ -168,6 +249,8 @@ audio-to-text-transcriber/
 - 🎙️ **播客转录**：将播客内容转换为文字
 - 📺 **视频字幕**：为视频生成实时字幕
 - 📚 **学习笔记**：记录在线课程的语音内容
+- 💬 **AI 语音助手**：通过语音与 AI 进行自然对话
+- 🗣️ **翻译助手**：将外语音频实时转录并理解
 
 ## 🐛 故障排除
 
@@ -203,6 +286,14 @@ ffmpeg -version
 2. 确认语言设置正确：`LANGUAGE=zh` 或 `LANGUAGE=en`
 3. 启用智能格式化：`SMART_FORMAT=true`
 
+### 问题：AI 不回答或响应缓慢
+
+**解决方案**：
+1. 检查相应的 API Key 是否正确
+2. 增加 `SILENCE_TIMEOUT_MS` 值（例如设为 2000）让系统有更多时间判断你的问题是否结束
+3. 检查网络连接和防火墙设置
+4. 切换到不同的 AI 提供商尝试
+
 ## 📊 性能优化
 
 - **采样率**：默认 16kHz，可以提高到 48kHz 以获得更好质量
@@ -211,13 +302,25 @@ ffmpeg -version
   - `nova-2`：最高准确度（推荐）
   - `nova`：平衡性能
   - `base`：最快速度
+- **静默检测**：调整 `SILENCE_TIMEOUT_MS` 值（1000-2500ms）以优化问答体验
+- **部分上报**：设置 `PARTIAL_SEND=false` 可减少网络请求量
 
 ## 🔒 安全提示
 
 - 🚫 **永远不要**将 `.env` 文件提交到 Git
-- 🔑 **保护好**你的 Deepgram API Key
+- 🔑 **保护好**你的 API Key
 - 📝 使用 `.env.example` 作为配置模板
-- 🔐 如果 API Key 泄露，立即在 Deepgram 控制台撤销
+- 🔐 如果 API Key 泄露，立即在对应平台上撤销
+
+## 后续改进方向
+
+1. **TypeScript 重构**：增加类型安全和代码可维护性
+2. **官方 SDK 集成**：替换自定义 HTTP 请求，使用官方 SDK（如 `openai`、`@anthropic/sdk`）
+3. **更精确的 VAD**：集成真实的语音活动检测（Voice Activity Detection）
+4. **会话管理**：持久化对话历史，支持上下文理解
+5. **日志轮转**：自动按日期归档日志，避免文件过大
+6. **Web 界面**：添加简单的 Web UI，便于使用和配置
+7. **多平台支持**：扩展对 Windows 和 Linux 的支持
 
 ## 📄 许可证
 
@@ -227,11 +330,13 @@ MIT License - 详见 [LICENSE](LICENSE)
 
 欢迎提交 Issue 和 Pull Request！
 
-## 📞 支持
+## 📞 支持与文档
 
 - 📖 [Deepgram 文档](https://developers.deepgram.com/)
 - 🎙️ [BlackHole GitHub](https://github.com/ExistentialAudio/BlackHole)
 - 🎬 [FFmpeg 文档](https://ffmpeg.org/documentation.html)
+- 🤖 [OpenAI API 文档](https://platform.openai.com/docs/)
+- 🧠 [Claude API 文档](https://docs.anthropic.com/claude/reference/)
 
 ## ⭐ Star History
 
@@ -240,85 +345,3 @@ MIT License - 详见 [LICENSE](LICENSE)
 ---
 
 **Made with ❤️ using Node.js, FFmpeg, Deepgram, and BlackHole**
-
-## 实时语音 -> AI 问答（流式）
-新增功能：把实时转录文本流式/增量发送给 AI（支持 OpenAI / Claude / Deepseek），并将 AI 回答输出到控制台及文件（默认 `transcripts/qa_output.txt`）。
-
-### 环境变量（重要）
-请在 `.env` 中设置：
-- `DEEPGRAM_API_KEY` (必需)
-- `AI_PROVIDER` — `openai` | `claude` | `deepseek`（默认 `openai`）
-- 对应 provider 的 key：
-  - `OPENAI_API_KEY`
-  - `CLAUDE_API_KEY`
-  - `DEEPSEEK_API_KEY` & `DEEPSEEK_ENDPOINT`
-- 其他选项：`SILENCE_TIMEOUT_MS`, `AI_SYSTEM_PROMPT`, `PARTIAL_SEND` 等。
-
-### 运行
-```bash
-npm install
-node src/index.js
-
-
-
-
-
-
-
-说明（重要）
-
-静默判定：我使用 silenceTimeoutMs（默认 1500ms）来判断“用户是否已问完”。这是在没有更复杂语音活动检测（VAD）时较稳定的做法：当转录输入在该时间内没有新的片段到达，就把当前缓冲内容视为一个完整问题并向 AI 发起回答请求。你可以在 .env 调整 SILENCE_TIMEOUT_MS 值（例如 1000 或 2000）来微调灵敏度。
-
-流式 vs 增量：
-
-代码实现了增量上报（partialSend）：每个转录片段都会被推到 AI 管理器做记录（目前大多数 provider 无明显“记录”接口，所以实现为 noop，以后可以在支持的 provider 中扩展）。
-
-最终回答使用 provider 的stream（如果 provider 支持）或一次性调用（Deepseek 假设不支持流）。OpenAI 和 Claude 的流式解析做了基础实现（基于 SSE/text chunks）——但注意：各 provider 的流格式可能发生变化，需要你根据实际 provider SDK/文档调试（尤其 Anthropic/Claude 的 endpoint 与字段）。
-
-AI 提示词（system prompt）：通过 AI_SYSTEM_PROMPT 环境变量可自定义（已设置默认 prompt，包含“需要判断是否问完问题”与回答风格要求）。
-
-输出文件：
-
-转录文本仍写入 OUTPUT_FILE（默认 transcripts/output.txt）。
-
-AI 问答写入 QA_OUTPUT_FILE（默认 transcripts/qa_output.txt）。
-
-两者都追加模式写入，方便保持历史记录。
-
-Deepseek：我把 Deepseek 实现为“通用 HTTP one-shot”。请替换 DEEPSEEK_ENDPOINT 为你真实的 Deepseek API endpoint 并根据其请求/响应格式调整 _callDeepseek。
-
-
-
-
-
-
-
-
-
-如何判断“用户说完了”？
-
-使用静默检测：当一定时间（SILENCE_TIMEOUT_MS，默认 1500ms）内没有新转录片段到达，系统认为用户已完成一句话并把当前缓冲文本作为一个完整问题交给 AI 回答。
-
-输出
-
-转录文本：transcripts/output.txt
-
-AI 问答：transcripts/qa_output.txt
-
-
-
-## 注意与后续建议（你可能想做的改进）
-1. 用 provider 官方 SDK（`openai` / `@anthropic/sdk`）替换手写 `fetch`，能更稳定地支持流式和错误处理。
-2. 如果要更精确的“用户结束”判定，接入真实的 VAD（voice activity detection）或利用 Deepgram 的 `is_final` 标志（若 Deepgram live event 有该字段）。
-3. 增强会话管理：把会话持久化为 JSON（方便后续分析 / 回溯）。
-4. 把 AI key 与 endpoint 的错误处理更健壮，给出重试策略与限流。
-5. 在生产环境中，把 QA 文件轮转（按日归档）以免文件过大。
-
----
-
-如果你希望，我可以：
-- 把上面代码转成 TypeScript（带类型与更严格的错误处理）。
-- 用官方 SDK（OpenAI / Anthropic）把 streaming 做得更稳健（需要我把你想用的具体 model 与 SDK 告诉我，我会直接写出依赖与代码）。
-- 帮你把 `DEEPSEEK_ENDPOINT` 的真实 API 格式接入（如果你贴出 Deepseek 的 API 文档示例，我会把 `_callDeepseek` 完善为流式或正确的请求/解析代码）。
-
-现在我已把核心实现写好并给出 README & Git 操作建议；如果你要我继续把某一 provider 换成官方 SDK 或把部分逻辑改为真正的 SSE/WebSocket 双向流，请直接告诉我你要优先完善的 provider（OpenAI / Claude / Deepseek），我会马上把那一段改成更稳健的实现并给出 `package.json` 需要的精确依赖。
