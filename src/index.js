@@ -28,15 +28,20 @@ const CONFIG = {
   openaiApiKey: process.env.OPENAI_API_KEY,
   claudeApiKey: process.env.CLAUDE_API_KEY,
   deepseekApiKey: process.env.DEEPSEEK_API_KEY,
+  deepseekEndpoint: process.env.DEEPSEEK_ENDPOINT || 'https://api.deepseek.ai/v1/chat/completions',
+  // AI 模型配置
+  openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  claudeModel: process.env.CLAUDE_MODEL || 'claude-3-opus-20240229',
+  deepseekModel: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
   // prompt / behavior
-  aiSystemPrompt: process.env.AI_SYSTEM_PROMPT || `你是一个智能问答助手。当前对话为“语音问答”。要求：
+  aiSystemPrompt: process.env.AI_SYSTEM_PROMPT || `你是一个智能问答助手。当前对话为"语音问答"。要求：
 1) 这是用户说出的语音转为文字后的内容，判定用户是否已经问完（可依据停顿/标点），如果未问完请等待更多输入；如果已问完请直接以回答者角色给出回答。
 2) 回答要简洁、准确，必要时给出步骤/提示。
 3) 如果用户有后续问题，请在结尾提示用户可以继续追问。
 `,
   // 静默检测（毫秒） — 在无新转录片段的情况下判定用户已结束一句话
   silenceTimeoutMs: parseInt(process.env.SILENCE_TIMEOUT_MS || '1500', 10),
-  // 部分上报策略：每当接收到一个 transcript chunk 就发送到 AI 的“记录”接口；最终在 silenceTimeout 触发完整提问
+  // 部分上报策略：每当接收到一个 transcript chunk 就发送到 AI 的"记录"接口；最终在 silenceTimeout 触发完整提问
   partialSend: process.env.PARTIAL_SEND !== 'false'
 };
 
@@ -106,7 +111,7 @@ class AIManager {
   }
 
   async _onSilenceTimeout() {
-    // 超过静默阈值，认定一句“用户话”结束 → 触发最终问答
+    // 超过静默阈值，认定一句"用户话"结束 → 触发最终问答
     if (!this.buffer || this.isProcessing) {
       this.buffer = '';
       return;
@@ -150,10 +155,9 @@ class AIManager {
       // include last N user messages for context (可改)
     ];
     // include some recent history
-    const recent = this.conversationHistory.slice(-10).map(h => {
-      // map partial -> user
-      const role = (h.role === 'user' || h.role === 'user_partial') ? 'user' : h.role;
-      return { role, content: h.content };
+    const recent = this.conversationHistory.slice(-10).filter(h => {
+      // 过滤掉 partial 记录，只保留完整对话
+      return h.role !== 'user_partial';
     });
     messages.push(...recent);
     messages.push({ role: 'user', content: question });
@@ -163,28 +167,70 @@ class AIManager {
     if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, qaHeader);
 
     // Dispatch to provider
-    if (this.provider === 'openai') {
-      await this._callOpenAIStream(messages);
-    } else if (this.provider === 'claude') {
-      await this._callClaudeStream(messages);
-    } else if (this.provider === 'deepseek') {
-      await this._callDeepseek(messages);
-    } else {
-      console.warn('⚠️ Unknown AI provider:', this.provider);
+    let partialAnswer = '';
+    try {
+      // 统一使用 streamCompletion 方法处理所有 AI provider
+      partialAnswer = await this._streamCompletion(messages);
+    } catch (error) {
+      console.error(`❌ ${this.provider.toUpperCase()} error:`, error.message);
+      if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, `${this.provider.toUpperCase()} error: ${error.message}\n`);
     }
 
+    this.conversationHistory.push({ role: 'assistant', content: partialAnswer, timestamp: new Date().toISOString() });
+    
     const endTs = new Date().toISOString();
     if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, `\n=== QA Session Ended: ${endTs} ===\n`);
   }
 
-  // OpenAI streaming implementation (v1 chat completions stream)
-  async _callOpenAIStream(messages) {
+  // 统一的流式调用方法，根据 provider 类型调用不同的实现
+  async _streamCompletion(messages) {
+    switch (this.provider) {
+      case 'openai':
+        return await this._streamOpenAI(messages);
+      case 'claude':
+        return await this._streamClaude(messages);
+      case 'deepseek':
+        return await this._streamDeepseek(messages);
+      default:
+        throw new Error(`Unknown AI provider: ${this.provider}`);
+    }
+  }
+
+  // 处理 Reader 流的通用方法
+  async _processStream(reader, textDecoder, parseChunk) {
+    let done = false;
+    let partialAnswer = '';
+    
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      
+      if (value) {
+        const chunk = textDecoder.decode(value, { stream: true });
+        const tokens = parseChunk(chunk);
+        
+        for (const token of tokens) {
+          if (token) {
+            process.stdout.write(token);
+            partialAnswer += token;
+            if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, token);
+          }
+        }
+      }
+    }
+    
+    if (this.config.logToConsole) console.log('\n'); // Add a newline after streaming
+    return partialAnswer;
+  }
+
+  // OpenAI 流式实现 (使用 v1 completions API)
+  async _streamOpenAI(messages) {
     const apiKey = this.config.openaiApiKey;
     const url = 'https://api.openai.com/v1/chat/completions';
 
-    // We will request stream=true and parse the SSE-like stream
+    // 请求 stream=true 并解析 SSE 流
     const body = {
-      model: 'gpt-4o-mini', // or another model; could be env-configurable
+      model: this.config.openaiModel,
       messages: messages,
       temperature: 0.2,
       stream: true
@@ -201,79 +247,66 @@ class AIManager {
 
     if (!res.ok) {
       const text = await res.text();
-      console.error('❌ OpenAI error:', res.status, text);
-      if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, `OpenAI error: ${res.status}\n${text}\n`);
-      return;
+      throw new Error(`HTTP error ${res.status}: ${text}`);
     }
 
-    // 流式解析
+    // 使用通用流处理方法
     const reader = res.body.getReader();
     const decoder = new TextDecoder('utf-8');
-    let done = false;
-    let partialAnswer = '';
-
-    while (!done) {
-      const { value, done: readerDone } = await reader.read();
-      done = readerDone;
-      if (value) {
-        const chunk = decoder.decode(value, { stream: true });
-        // OpenAI stream uses lines starting with "data: "
-        const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0);
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const payload = line.replace(/^data: /, '');
-            if (payload === '[DONE]') {
-              // finished
-              if (this.config.logToConsole) console.log('\n--- OpenAI stream done ---\n');
-              break;
-            }
-            try {
-              const parsed = JSON.parse(payload);
-              const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text;
-              if (delta) {
-                process.stdout.write(delta);
-                partialAnswer += delta;
-                if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, delta);
-              }
-            } catch (e) {
-              // ignore JSON parse errors
-            }
-          } else {
-            // non-data lines (ignore)
+    
+    return await this._processStream(reader, decoder, (chunk) => {
+      // OpenAI 流解析
+      const tokens = [];
+      const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0);
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const payload = line.replace(/^data: /, '');
+          if (payload === '[DONE]') continue;
+          
+          try {
+            const parsed = JSON.parse(payload);
+            const token = parsed.choices?.[0]?.delta?.content || '';
+            if (token) tokens.push(token);
+          } catch (e) {
+            // 忽略 JSON 解析错误
           }
         }
       }
-    }
-
-    // push assistant record to conversationHistory
-    this.conversationHistory.push({ role: 'assistant', content: partialAnswer, timestamp: new Date().toISOString() });
-    if (this.config.logToConsole) console.log('\n'); // newline after stream
+      
+      return tokens;
+    });
   }
 
-  // Claude streaming (Anthropic) - pseudo-implementation using their streaming API format
-  async _callClaudeStream(messages) {
-    // Anthropic expects single prompt string. We'll concat messages into prompt.
+  // Claude 流式实现
+  async _streamClaude(messages) {
     const apiKey = this.config.claudeApiKey;
-    // Build prompt text
-    const promptParts = messages.map(m => {
-      const role = m.role === 'system' ? 'System' : (m.role === 'user' ? 'User' : 'Assistant');
-      return `${role}: ${m.content}`;
-    });
-    const prompt = promptParts.join('\n') + '\nAssistant:';
-
-    const url = 'https://api.anthropic.com/v1/complete'; // check Anthropic docs in your environment
+    
+    // 构建 API 请求
+    // 注意：Claude API 从旧版的 v1/complete 已更新到 v1/messages
+    const url = 'https://api.anthropic.com/v1/messages';
+    
+    // 转换消息格式为 Claude 格式
+    const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
+    const userMessages = messages.filter(m => m.role !== 'system');
+    
     const body = {
-      model: 'claude-2.1', // or env-config
-      prompt,
-      stream: true,
+      model: this.config.claudeModel,
+      system: systemPrompt,
+      messages: userMessages.map(m => ({
+        role: m.role,
+        content: m.content
+      })),
       max_tokens: 800,
-      temperature: 0.2
+      temperature: 0.2,
+      stream: true
     };
 
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(body)
@@ -281,54 +314,51 @@ class AIManager {
 
     if (!res.ok) {
       const text = await res.text();
-      console.error('❌ Claude error:', res.status, text);
-      if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, `Claude error: ${res.status}\n${text}\n`);
-      return;
+      throw new Error(`HTTP error ${res.status}: ${text}`);
     }
 
-    // 解析 streaming body（类似于 OpenAI 的 stream）
+    // 使用通用流处理方法
     const reader = res.body.getReader();
     const decoder = new TextDecoder('utf-8');
-    let partialAnswer = '';
-    let done = false;
-
-    while (!done) {
-      const { value, done: readerDone } = await reader.read();
-      done = readerDone;
-      if (value) {
-        const chunk = decoder.decode(value, { stream: true });
-        // Anthropic stream format may differ; common approach：每个 chunk 是 JSON 行
-        const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0);
-        for (const line of lines) {
+    
+    return await this._processStream(reader, decoder, (chunk) => {
+      // Claude 流解析
+      const tokens = [];
+      const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0);
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const payload = line.replace(/^data: /, '');
+          if (payload === '[DONE]') continue;
+          
           try {
-            const parsed = JSON.parse(line);
-            const token = parsed?.completion;
-            if (token) {
-              process.stdout.write(token);
-              partialAnswer += token;
-              if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, token);
-            }
+            const parsed = JSON.parse(payload);
+            // 新版 Claude API 在 delta.text 中返回 token
+            const token = parsed.delta?.text || '';
+            if (token) tokens.push(token);
           } catch (e) {
-            // fallback: treat raw chunk as text
-            process.stdout.write(line);
-            partialAnswer += line;
-            if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, line);
+            // 非 JSON 行，可能是普通文本（旧版API）
+            if (line !== 'data: [DONE]') tokens.push(line);
           }
         }
       }
-    }
-
-    this.conversationHistory.push({ role: 'assistant', content: partialAnswer, timestamp: new Date().toISOString() });
-    if (this.config.logToConsole) console.log('\n');
+      
+      return tokens;
+    });
   }
 
-  // Deepseek (generic HTTP) - no streaming assumed (one-shot)
-  async _callDeepseek(messages) {
+  // Deepseek 流式实现
+  async _streamDeepseek(messages) {
     const apiKey = this.config.deepseekApiKey;
-    const url = process.env.DEEPSEEK_ENDPOINT || 'https://api.deepseek.example.com/v1/qa'; // 用户需配置真实 endpoint
-    // combine into one question body
-    const question = messages.filter(m => m.role === 'user').map(m => m.content).join('\n');
-    const body = { question, system: this.config.aiSystemPrompt, max_tokens: 800 };
+    const url = this.config.deepseekEndpoint;
+    
+    // 构建 API 请求 - 使用与 OpenAI 兼容的格式
+    const body = {
+      model: this.config.deepseekModel,
+      messages: messages,
+      temperature: 0.2,
+      stream: true
+    };
 
     const res = await fetch(url, {
       method: 'POST',
@@ -341,20 +371,42 @@ class AIManager {
 
     if (!res.ok) {
       const text = await res.text();
-      console.error('❌ Deepseek error:', res.status, text);
-      if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, `Deepseek error: ${res.status}\n${text}\n`);
-      return;
+      throw new Error(`HTTP error ${res.status}: ${text}`);
     }
-    const data = await res.json();
-    const answer = data.answer || data.text || JSON.stringify(data);
-    // 输出一次性答案
-    if (this.config.logToConsole) {
-      console.log(answer);
-    }
-    if (this.config.saveToFile) {
-      appendFileSync(this.config.qaOutputFile, answer + '\n');
-    }
-    this.conversationHistory.push({ role: 'assistant', content: answer, timestamp: new Date().toISOString() });
+
+    // 使用通用流处理方法
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    
+    return await this._processStream(reader, decoder, (chunk) => {
+      // Deepseek 流解析 (假设类似 OpenAI 格式)
+      const tokens = [];
+      const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0);
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const payload = line.replace(/^data: /, '');
+          if (payload === '[DONE]') continue;
+          
+          try {
+            const parsed = JSON.parse(payload);
+            // 尝试多种可能的字段格式
+            const token = parsed.choices?.[0]?.delta?.content || 
+                        parsed.choices?.[0]?.text || 
+                        parsed.data?.content || '';
+            if (token) tokens.push(token);
+          } catch (e) {
+            // 如果不是JSON，可能是直接文本
+            if (!line.includes('[DONE]')) tokens.push(line.replace('data: ', ''));
+          }
+        } else if (line.trim() && !line.includes('[DONE]')) {
+          // 可能是直接文本输出
+          tokens.push(line);
+        }
+      }
+      
+      return tokens;
+    });
   }
 }
 
@@ -496,6 +548,7 @@ class AudioTranscriber {
 
       console.log('='.repeat(50));
       console.log('✅ Transcription service started successfully!');
+      console.log(`🤖 AI Provider: ${this.config.aiProvider.toUpperCase()}`);
       console.log('Press Ctrl+C to stop\n');
 
     } catch (error) {
