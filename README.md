@@ -14,6 +14,7 @@
 - 🌏 **多语言支持**：支持中文、英文等多种语言
 - 💬 **AI 对话**：将转录文本发送给 AI（支持 OpenAI/Claude/Deepseek）获取实时回答
 - 🌊 **全流式响应**：所有 AI 提供商（包括 Deepseek）均支持流式回答
+- 🔄 **智能中断**：在 AI 回答过程中，可通过语音打断 AI，实现更自然的对话体验
 - 💾 **自动保存**：转录结果和 AI 对话实时保存到文件
 - 📊 **时间戳**：每条转录都带有精确时间戳
 - 🎛️ **灵活配置**：通过环境变量轻松自定义
@@ -126,9 +127,18 @@ npm start
 
 - **OpenAI**: 使用官方流式 API 接收实时 token
 - **Claude**: 使用新版 Messages API 进行流式响应
-- **Deepseek**: 实现与 OpenAI 兼容的流式接口
+- **Deepseek**: 使用 OpenAI SDK 与流式接口，通过兼容 API 实现流式响应
 
 所有提供商现在使用统一的 `_streamCompletion` 架构，提供一致的用户体验。
+
+### 🔄 中断功能
+
+新增中断功能让对话更自然：
+
+- 在 AI 回答时，你可以说话打断 AI 的回答
+- 系统检测到新的语音输入后，会中断当前 AI 回答
+- 等待静默一段时间（默认 300 毫秒）后确认打断
+- 打断的回答会被标记为 `[回答被中断]` 并保存到历史记录
 
 ### 配置 AI 对话
 
@@ -142,7 +152,7 @@ AI_PROVIDER=openai           # openai | claude | deepseek
 OPENAI_API_KEY=your_openai_key
 CLAUDE_API_KEY=your_claude_key
 DEEPSEEK_API_KEY=your_deepseek_key
-DEEPSEEK_ENDPOINT=https://api.deepseek.ai/v1/chat/completions
+DEEPSEEK_ENDPOINT=https://api.deepseek.com
 
 # AI 模型配置
 OPENAI_MODEL=gpt-4o-mini
@@ -157,6 +167,10 @@ AI_SYSTEM_PROMPT="你是智能问答助理，请简洁、准确地回答用户�
 
 # 启用增量上报（实时将部分转录发送给 AI）
 PARTIAL_SEND=true
+
+# 中断功能配置
+ALLOW_INTERRUPTION=true       # 是否允许中断 AI 回答
+INTERRUPTION_DETECTION_MS=300 # 中断检测时间（毫秒）
 
 # AI 对话输出文件
 QA_OUTPUT_FILE=transcripts/qa_output.txt
@@ -210,7 +224,7 @@ AI_PROVIDER=openai           # openai | claude | deepseek
 OPENAI_API_KEY=your_openai_key
 CLAUDE_API_KEY=your_claude_key
 DEEPSEEK_API_KEY=your_deepseek_key
-DEEPSEEK_ENDPOINT=https://api.deepseek.ai/v1/chat/completions
+DEEPSEEK_ENDPOINT=https://api.deepseek.com
 
 # AI 模型配置
 OPENAI_MODEL=gpt-4o-mini
@@ -221,6 +235,10 @@ DEEPSEEK_MODEL=deepseek-chat
 AI_SYSTEM_PROMPT="你是智能问答助理，请简洁、准确地回答用户问题。"
 SILENCE_TIMEOUT_MS=1500
 PARTIAL_SEND=true
+
+# 中断功能配置
+ALLOW_INTERRUPTION=true       # 是否允许中断 AI 回答
+INTERRUPTION_DETECTION_MS=300 # 中断检测时间（毫秒）
 ```
 
 ## 📁 项目结构
@@ -253,7 +271,8 @@ audio-to-text-transcriber/
 2. **⏱️ 静默检测** → 检测到用户停顿（默认 1.5 秒）判定为问题结束
 3. **🧠 AI 处理** → 将问题发送给选定的 AI 提供商（OpenAI/Claude/Deepseek）
 4. **💬 流式回答** → AI 回答实时流式显示在控制台（所有提供商均支持）
-5. **📝 记录保存** → 问答对话保存到文件（默认 `transcripts/qa_output.txt`）
+5. **🔄 中断处理** → 在回答过程中如有新输入，系统可中断 AI 回答
+6. **📝 记录保存** → 问答对话保存到文件（默认 `transcripts/qa_output.txt`）
 
 ### 技术栈
 
@@ -262,7 +281,9 @@ audio-to-text-transcriber/
 - **BlackHole**：macOS 虚拟音频设备
 - **Deepgram SDK**：实时语音识别 API
 - **WebSocket**：低延迟双向通信
-- **OpenAI/Claude/Deepseek API**：AI 对话能力（均支持流式响应）
+- **OpenAI SDK**：用于 OpenAI 和 Deepseek（通过兼容 API）调用
+- **Fetch API**：用于 Claude API 调用
+- **AbortController**：用于中断 AI 回答流
 
 ## 🎯 使用场景
 
@@ -271,7 +292,7 @@ audio-to-text-transcriber/
 - 🎙️ **播客转录**：将播客内容转换为文字
 - 📺 **视频字幕**：为视频生成实时字幕
 - 📚 **学习笔记**：记录在线课程的语音内容
-- 💬 **AI 语音助手**：通过语音与 AI 进行自然对话
+- 💬 **AI 语音助手**：通过语音与 AI 进行自然对话，可以随时打断 AI
 - 🗣️ **翻译助手**：将外语音频实时转录并理解
 
 ## 🐛 故障排除
@@ -324,6 +345,14 @@ ffmpeg -version
 2. 确认你使用的是最新版本的代码，包含统一流式处理功能
 3. 在环境变量中设置正确的 `DEEPSEEK_ENDPOINT`
 
+### 问题：中断功能不工作
+
+**解决方案**：
+1. 确认 `.env` 中 `ALLOW_INTERRUPTION=true` 设置正确
+2. 调整 `INTERRUPTION_DETECTION_MS` 值（例如设为 500）以获得更灵敏的中断体验
+3. 确保麦克风工作正常，能够捕获你的语音
+4. 检查 `package.json` 中是否包含最新的依赖项，特别是 `openai` SDK
+
 ## 📊 性能优化
 
 - **采样率**：默认 16kHz，可以提高到 48kHz 以获得更好质量
@@ -333,6 +362,7 @@ ffmpeg -version
   - `nova`：平衡性能
   - `base`：最快速度
 - **静默检测**：调整 `SILENCE_TIMEOUT_MS` 值（1000-2500ms）以优化问答体验
+- **中断敏感度**：调整 `INTERRUPTION_DETECTION_MS` 值（200-500ms）以获得更灵敏或更稳定的中断体验
 - **部分上报**：设置 `PARTIAL_SEND=false` 可减少网络请求量
 - **AI 模型选择**：
   - 通过 `OPENAI_MODEL`、`CLAUDE_MODEL` 和 `DEEPSEEK_MODEL` 环境变量调整模型
@@ -347,12 +377,13 @@ ffmpeg -version
 ## 后续改进方向
 
 1. **TypeScript 重构**：增加类型安全和代码可维护性
-2. **官方 SDK 集成**：替换自定义 HTTP 请求，使用官方 SDK（如 `openai`、`@anthropic/sdk`）
+2. **官方 SDK 集成**：替换自定义 HTTP 请求，使用官方 SDK（如 `@anthropic/sdk`）
 3. **更精确的 VAD**：集成真实的语音活动检测（Voice Activity Detection）
 4. **会话管理**：持久化对话历史，支持上下文理解
 5. **日志轮转**：自动按日期归档日志，避免文件过大
 6. **Web 界面**：添加简单的 Web UI，便于使用和配置
 7. **多平台支持**：扩展对 Windows 和 Linux 的支持
+8. **语音合成**：集成 TTS 将 AI 回答转换为语音输出
 
 ## 📄 许可证
 
