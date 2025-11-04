@@ -13,6 +13,7 @@ English | [中文](./README.md)
 - 🎯 **High Accuracy Recognition**: Powered by Deepgram Nova-2 AI models
 - 🌏 **Multi-language Support**: Works with Chinese, English, and many other languages
 - 💬 **AI Conversation**: Send transcribed text to AI (OpenAI/Claude/Deepseek) for instant responses
+- 🌊 **Unified Streaming**: All AI providers (including Deepseek) now support streaming responses
 - 💾 **Automatic Saving**: Transcripts and AI conversations saved to files in real-time
 - 📊 **Timestamps**: Each transcription includes precise timestamps
 - 🎛️ **Flexible Configuration**: Easy customization through environment variables
@@ -119,6 +120,16 @@ This project supports automatically sending transcribed speech to an AI for conv
 3. The complete question is sent to the AI for processing
 4. The AI's answer is displayed in real-time in the console and saved to a file
 
+### 🆕 Unified Streaming Implementation
+
+The latest version implements unified streaming for all AI providers:
+
+- **OpenAI**: Uses the official streaming API to receive tokens in real-time
+- **Claude**: Uses the new Messages API for streaming responses
+- **Deepseek**: Implements an OpenAI-compatible streaming interface
+
+All providers now use a unified `_streamCompletion` architecture, providing a consistent user experience.
+
 ### Configuring AI Conversation
 
 Set the following parameters in the `.env` file:
@@ -131,7 +142,12 @@ AI_PROVIDER=openai           # openai | claude | deepseek
 OPENAI_API_KEY=your_openai_key
 CLAUDE_API_KEY=your_claude_key
 DEEPSEEK_API_KEY=your_deepseek_key
-DEEPSEEK_ENDPOINT=https://api.deepseek.your/qa
+DEEPSEEK_ENDPOINT=https://api.deepseek.ai/v1/chat/completions
+
+# AI Model Configuration
+OPENAI_MODEL=gpt-4o-mini
+CLAUDE_MODEL=claude-3-opus-20240229
+DEEPSEEK_MODEL=deepseek-chat
 
 # Silence Detection Time (milliseconds) - Determines when a question is complete
 SILENCE_TIMEOUT_MS=1500
@@ -194,8 +210,14 @@ AI_PROVIDER=openai           # openai | claude | deepseek
 OPENAI_API_KEY=your_openai_key
 CLAUDE_API_KEY=your_claude_key
 DEEPSEEK_API_KEY=your_deepseek_key
-DEEPSEEK_ENDPOINT=https://api.deepseek.your/qa
+DEEPSEEK_ENDPOINT=https://api.deepseek.ai/v1/chat/completions
 
+# AI Model Configuration
+OPENAI_MODEL=gpt-4o-mini
+CLAUDE_MODEL=claude-3-opus-20240229
+DEEPSEEK_MODEL=deepseek-chat
+
+# AI Behavior Configuration
 AI_SYSTEM_PROMPT="You are an intelligent assistant. Please answer questions concisely and accurately."
 SILENCE_TIMEOUT_MS=1500
 PARTIAL_SEND=true
@@ -230,7 +252,7 @@ audio-to-text-transcriber/
 1. **🎙️ Voice Input** → User's speech is transcribed to text
 2. **⏱️ Silence Detection** → Detects when user has paused (default 1.5 seconds) to determine question completion
 3. **🧠 AI Processing** → Sends the question to selected AI provider (OpenAI/Claude/Deepseek)
-4. **💬 Streaming Response** → AI answers stream in real-time to the console
+4. **💬 Streaming Response** → AI answers stream in real-time to the console (all providers now support this)
 5. **📝 Record Saving** → Q&A conversation saved to file (default `transcripts/qa_output.txt`)
 
 ### Tech Stack
@@ -240,7 +262,7 @@ audio-to-text-transcriber/
 - **BlackHole**: macOS virtual audio device
 - **Deepgram SDK**: Real-time speech recognition API
 - **WebSocket**: Low-latency bidirectional communication
-- **OpenAI/Claude/Deepseek APIs**: AI conversation capabilities
+- **OpenAI/Claude/Deepseek APIs**: AI conversation capabilities (all with streaming support)
 
 ## 🎯 Use Cases
 
@@ -293,6 +315,14 @@ ffmpeg -version
 2. Increase the `SILENCE_TIMEOUT_MS` value (e.g., set to 2000) to give the system more time to determine if your question is complete
 3. Check network connection and firewall settings
 4. Try switching to a different AI provider
+5. Verify that the AI provider's API endpoint is correct (especially for Deepseek)
+
+### Problem: Deepseek Not Using Streaming Responses
+
+**Solution**:
+1. Check if the Deepseek API endpoint supports streaming (requires `stream=true` in the request)
+2. Make sure you're using the latest version of the code with unified streaming implementation
+3. Set the correct `DEEPSEEK_ENDPOINT` in your environment variables
 
 ## 📊 Performance Optimization
 
@@ -304,6 +334,8 @@ ffmpeg -version
   - `base`: Fastest speed
 - **Silence Detection**: Adjust `SILENCE_TIMEOUT_MS` value (1000-2500ms) to optimize Q&A experience
 - **Partial Updates**: Set `PARTIAL_SEND=false` to reduce network requests
+- **AI Model Selection**:
+  - Adjust models via `OPENAI_MODEL`, `CLAUDE_MODEL`, and `DEEPSEEK_MODEL` environment variables
 
 ## 🔒 Security Tips
 
@@ -337,6 +369,7 @@ Issues and Pull Requests are welcome!
 - 🎬 [FFmpeg Documentation](https://ffmpeg.org/documentation.html)
 - 🤖 [OpenAI API Documentation](https://platform.openai.com/docs/)
 - 🧠 [Claude API Documentation](https://docs.anthropic.com/claude/reference/)
+- 🔍 [Deepseek API Documentation](https://platform.deepseek.ai/docs)
 
 ## ⭐ Star History
 
