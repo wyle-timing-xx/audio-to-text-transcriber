@@ -13,6 +13,7 @@
 - 🎯 **高精度识别**：基于 Deepgram Nova-2 AI 模型
 - 🌏 **多语言支持**：支持中文、英文等多种语言
 - 💬 **AI 对话**：将转录文本发送给 AI（支持 OpenAI/Claude/Deepseek）获取实时回答
+- 🌊 **全流式响应**：所有 AI 提供商（包括 Deepseek）均支持流式回答
 - 💾 **自动保存**：转录结果和 AI 对话实时保存到文件
 - 📊 **时间戳**：每条转录都带有精确时间戳
 - 🎛️ **灵活配置**：通过环境变量轻松自定义
@@ -119,6 +120,16 @@ npm start
 3. 将完整问题发送给 AI 处理
 4. AI 的回答会实时流式显示在控制台并保存到文件
 
+### 🆕 统一流式处理
+
+最新版本实现了所有 AI 提供商的统一流式处理：
+
+- **OpenAI**: 使用官方流式 API 接收实时 token
+- **Claude**: 使用新版 Messages API 进行流式响应
+- **Deepseek**: 实现与 OpenAI 兼容的流式接口
+
+所有提供商现在使用统一的 `_streamCompletion` 架构，提供一致的用户体验。
+
 ### 配置 AI 对话
 
 在 `.env` 文件中设置以下参数：
@@ -131,7 +142,12 @@ AI_PROVIDER=openai           # openai | claude | deepseek
 OPENAI_API_KEY=your_openai_key
 CLAUDE_API_KEY=your_claude_key
 DEEPSEEK_API_KEY=your_deepseek_key
-DEEPSEEK_ENDPOINT=https://api.deepseek.your/qa
+DEEPSEEK_ENDPOINT=https://api.deepseek.ai/v1/chat/completions
+
+# AI 模型配置
+OPENAI_MODEL=gpt-4o-mini
+CLAUDE_MODEL=claude-3-opus-20240229
+DEEPSEEK_MODEL=deepseek-chat
 
 # 静默检测时间（毫秒）- 判断用户是否已提问完毕
 SILENCE_TIMEOUT_MS=1500
@@ -194,8 +210,14 @@ AI_PROVIDER=openai           # openai | claude | deepseek
 OPENAI_API_KEY=your_openai_key
 CLAUDE_API_KEY=your_claude_key
 DEEPSEEK_API_KEY=your_deepseek_key
-DEEPSEEK_ENDPOINT=https://api.deepseek.your/qa
+DEEPSEEK_ENDPOINT=https://api.deepseek.ai/v1/chat/completions
 
+# AI 模型配置
+OPENAI_MODEL=gpt-4o-mini
+CLAUDE_MODEL=claude-3-opus-20240229
+DEEPSEEK_MODEL=deepseek-chat
+
+# AI 行为配置
 AI_SYSTEM_PROMPT="你是智能问答助理，请简洁、准确地回答用户问题。"
 SILENCE_TIMEOUT_MS=1500
 PARTIAL_SEND=true
@@ -230,7 +252,7 @@ audio-to-text-transcriber/
 1. **🎙️ 语音输入** → 用户说话被转录为文字
 2. **⏱️ 静默检测** → 检测到用户停顿（默认 1.5 秒）判定为问题结束
 3. **🧠 AI 处理** → 将问题发送给选定的 AI 提供商（OpenAI/Claude/Deepseek）
-4. **💬 流式回答** → AI 回答实时流式显示在控制台
+4. **💬 流式回答** → AI 回答实时流式显示在控制台（所有提供商均支持）
 5. **📝 记录保存** → 问答对话保存到文件（默认 `transcripts/qa_output.txt`）
 
 ### 技术栈
@@ -240,7 +262,7 @@ audio-to-text-transcriber/
 - **BlackHole**：macOS 虚拟音频设备
 - **Deepgram SDK**：实时语音识别 API
 - **WebSocket**：低延迟双向通信
-- **OpenAI/Claude/Deepseek API**：AI 对话能力
+- **OpenAI/Claude/Deepseek API**：AI 对话能力（均支持流式响应）
 
 ## 🎯 使用场景
 
@@ -293,6 +315,14 @@ ffmpeg -version
 2. 增加 `SILENCE_TIMEOUT_MS` 值（例如设为 2000）让系统有更多时间判断你的问题是否结束
 3. 检查网络连接和防火墙设置
 4. 切换到不同的 AI 提供商尝试
+5. 确认 AI 提供商的 API 端点是否正确（特别是 Deepseek）
+
+### 问题：Deepseek 不使用流式响应
+
+**解决方案**：
+1. 检查 Deepseek API 端点是否支持流式处理（需在请求中指定 `stream=true`）
+2. 确认你使用的是最新版本的代码，包含统一流式处理功能
+3. 在环境变量中设置正确的 `DEEPSEEK_ENDPOINT`
 
 ## 📊 性能优化
 
@@ -304,6 +334,8 @@ ffmpeg -version
   - `base`：最快速度
 - **静默检测**：调整 `SILENCE_TIMEOUT_MS` 值（1000-2500ms）以优化问答体验
 - **部分上报**：设置 `PARTIAL_SEND=false` 可减少网络请求量
+- **AI 模型选择**：
+  - 通过 `OPENAI_MODEL`、`CLAUDE_MODEL` 和 `DEEPSEEK_MODEL` 环境变量调整模型
 
 ## 🔒 安全提示
 
@@ -337,6 +369,7 @@ MIT License - 详见 [LICENSE](LICENSE)
 - 🎬 [FFmpeg 文档](https://ffmpeg.org/documentation.html)
 - 🤖 [OpenAI API 文档](https://platform.openai.com/docs/)
 - 🧠 [Claude API 文档](https://docs.anthropic.com/claude/reference/)
+- 🔍 [Deepseek API 文档](https://platform.deepseek.ai/docs)
 
 ## ⭐ Star History
 
