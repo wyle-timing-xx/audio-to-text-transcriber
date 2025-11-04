@@ -5,6 +5,7 @@ import { createWriteStream, mkdirSync, appendFileSync } from 'fs';
 import { dirname } from 'path';
 import dotenv from 'dotenv';
 import fetch from 'node-fetch'; // npm i node-fetch@2 (or use global fetch in newer Node)
+import OpenAI from 'openai'; // 使用 OpenAI SDK 调用 Deepseek API
 import { pipeline } from 'stream';
 import { promisify } from 'util';
 
@@ -28,7 +29,7 @@ const CONFIG = {
   openaiApiKey: process.env.OPENAI_API_KEY,
   claudeApiKey: process.env.CLAUDE_API_KEY,
   deepseekApiKey: process.env.DEEPSEEK_API_KEY,
-  deepseekEndpoint: process.env.DEEPSEEK_ENDPOINT || 'https://api.deepseek.ai/v1/chat/completions',
+  deepseekEndpoint: process.env.DEEPSEEK_ENDPOINT || 'https://api.deepseek.com', // 默认使用官方 API 地址
   // AI 模型配置
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   claudeModel: process.env.CLAUDE_MODEL || 'claude-3-opus-20240229',
@@ -78,6 +79,18 @@ class AIManager {
     this.conversationHistory = []; // [{role, content, timestamp}]
     this.silenceTimer = null;
     this.isProcessing = false; // 是否正在等待 AI 最终回答
+    
+    // 初始化 OpenAI 客户端 (用于 Deepseek 和 OpenAI)
+    if (this.provider === 'openai') {
+      this.openai = new OpenAI({
+        apiKey: config.openaiApiKey
+      });
+    } else if (this.provider === 'deepseek') {
+      this.openai = new OpenAI({
+        baseURL: config.deepseekEndpoint,
+        apiKey: config.deepseekApiKey
+      });
+    }
   }
 
   // 将 fragment 添加到 buffer，并（可选）做 partial send（记录/上下文）
@@ -190,7 +203,7 @@ class AIManager {
       case 'claude':
         return await this._streamClaude(messages);
       case 'deepseek':
-        return await this._streamDeepseek(messages);
+        return await this._streamDeepseekWithSDK(messages);
       default:
         throw new Error(`Unknown AI provider: ${this.provider}`);
     }
@@ -347,66 +360,41 @@ class AIManager {
     });
   }
 
-  // Deepseek 流式实现
-  async _streamDeepseek(messages) {
-    const apiKey = this.config.deepseekApiKey;
-    const url = this.config.deepseekEndpoint;
-    
-    // 构建 API 请求 - 使用与 OpenAI 兼容的格式
-    const body = {
-      model: this.config.deepseekModel,
-      messages: messages,
-      temperature: 0.2,
-      stream: true
-    };
+  // 使用 OpenAI SDK 调用 Deepseek API（流式）
+  async _streamDeepseekWithSDK(messages) {
+    try {
+      // 使用 OpenAI SDK 创建流式对话完成
+      const stream = await this.openai.chat.completions.create({
+        model: this.config.deepseekModel,
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        })),
+        stream: true,
+        temperature: 0.2
+      });
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body)
-    });
+      let fullText = '';
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`HTTP error ${res.status}: ${text}`);
-    }
-
-    // 使用通用流处理方法
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    
-    return await this._processStream(reader, decoder, (chunk) => {
-      // Deepseek 流解析 (假设类似 OpenAI 格式)
-      const tokens = [];
-      const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0);
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const payload = line.replace(/^data: /, '');
-          if (payload === '[DONE]') continue;
+      // 处理流式响应
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || '';
+        if (content) {
+          process.stdout.write(content);
+          fullText += content;
           
-          try {
-            const parsed = JSON.parse(payload);
-            // 尝试多种可能的字段格式
-            const token = parsed.choices?.[0]?.delta?.content || 
-                        parsed.choices?.[0]?.text || 
-                        parsed.data?.content || '';
-            if (token) tokens.push(token);
-          } catch (e) {
-            // 如果不是JSON，可能是直接文本
-            if (!line.includes('[DONE]')) tokens.push(line.replace('data: ', ''));
+          // 保存到文件
+          if (this.config.saveToFile) {
+            appendFileSync(this.config.qaOutputFile, content);
           }
-        } else if (line.trim() && !line.includes('[DONE]')) {
-          // 可能是直接文本输出
-          tokens.push(line);
         }
       }
-      
-      return tokens;
-    });
+
+      if (this.config.logToConsole) console.log('\n'); // 流结束后添加换行
+      return fullText;
+    } catch (error) {
+      throw new Error(`Deepseek API error: ${error.message}`);
+    }
   }
 }
 
