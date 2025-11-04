@@ -14,6 +14,7 @@ English | [中文](./README.md)
 - 🌏 **Multi-language Support**: Works with Chinese, English, and many other languages
 - 💬 **AI Conversation**: Send transcribed text to AI (OpenAI/Claude/Deepseek) for instant responses
 - 🌊 **Unified Streaming**: All AI providers (including Deepseek) now support streaming responses
+- 🔄 **Intelligent Interruption**: Interrupt AI responses with your voice for a more natural conversation experience
 - 💾 **Automatic Saving**: Transcripts and AI conversations saved to files in real-time
 - 📊 **Timestamps**: Each transcription includes precise timestamps
 - 🎛️ **Flexible Configuration**: Easy customization through environment variables
@@ -126,9 +127,18 @@ The latest version implements unified streaming for all AI providers:
 
 - **OpenAI**: Uses the official streaming API to receive tokens in real-time
 - **Claude**: Uses the new Messages API for streaming responses
-- **Deepseek**: Implements an OpenAI-compatible streaming interface
+- **Deepseek**: Uses OpenAI SDK with a compatible streaming interface
 
 All providers now use a unified `_streamCompletion` architecture, providing a consistent user experience.
+
+### 🔄 Interruption Feature
+
+The new interruption feature makes conversations more natural:
+
+- You can speak to interrupt AI responses while they are being delivered
+- The system detects new voice input and interrupts the current AI response
+- After a brief silence (default 300ms), the interruption is confirmed
+- Interrupted responses are marked with `[Response interrupted]` and saved to the history
 
 ### Configuring AI Conversation
 
@@ -142,7 +152,7 @@ AI_PROVIDER=openai           # openai | claude | deepseek
 OPENAI_API_KEY=your_openai_key
 CLAUDE_API_KEY=your_claude_key
 DEEPSEEK_API_KEY=your_deepseek_key
-DEEPSEEK_ENDPOINT=https://api.deepseek.ai/v1/chat/completions
+DEEPSEEK_ENDPOINT=https://api.deepseek.com
 
 # AI Model Configuration
 OPENAI_MODEL=gpt-4o-mini
@@ -157,6 +167,10 @@ AI_SYSTEM_PROMPT="You are an intelligent assistant. Please answer questions conc
 
 # Enable Incremental Updates (Send partial transcriptions to AI in real-time)
 PARTIAL_SEND=true
+
+# Interruption Feature Configuration
+ALLOW_INTERRUPTION=true       # Enable or disable interruption feature
+INTERRUPTION_DETECTION_MS=300 # Interruption detection time (milliseconds)
 
 # AI Conversation Output File
 QA_OUTPUT_FILE=transcripts/qa_output.txt
@@ -210,7 +224,7 @@ AI_PROVIDER=openai           # openai | claude | deepseek
 OPENAI_API_KEY=your_openai_key
 CLAUDE_API_KEY=your_claude_key
 DEEPSEEK_API_KEY=your_deepseek_key
-DEEPSEEK_ENDPOINT=https://api.deepseek.ai/v1/chat/completions
+DEEPSEEK_ENDPOINT=https://api.deepseek.com
 
 # AI Model Configuration
 OPENAI_MODEL=gpt-4o-mini
@@ -221,6 +235,10 @@ DEEPSEEK_MODEL=deepseek-chat
 AI_SYSTEM_PROMPT="You are an intelligent assistant. Please answer questions concisely and accurately."
 SILENCE_TIMEOUT_MS=1500
 PARTIAL_SEND=true
+
+# Interruption Feature Configuration
+ALLOW_INTERRUPTION=true       # Enable or disable interruption feature
+INTERRUPTION_DETECTION_MS=300 # Interruption detection time (milliseconds)
 ```
 
 ## 📁 Project Structure
@@ -253,7 +271,8 @@ audio-to-text-transcriber/
 2. **⏱️ Silence Detection** → Detects when user has paused (default 1.5 seconds) to determine question completion
 3. **🧠 AI Processing** → Sends the question to selected AI provider (OpenAI/Claude/Deepseek)
 4. **💬 Streaming Response** → AI answers stream in real-time to the console (all providers now support this)
-5. **📝 Record Saving** → Q&A conversation saved to file (default `transcripts/qa_output.txt`)
+5. **🔄 Interruption Handling** → During AI response, new voice input can interrupt the current answer
+6. **📝 Record Saving** → Q&A conversation saved to file (default `transcripts/qa_output.txt`)
 
 ### Tech Stack
 
@@ -262,7 +281,9 @@ audio-to-text-transcriber/
 - **BlackHole**: macOS virtual audio device
 - **Deepgram SDK**: Real-time speech recognition API
 - **WebSocket**: Low-latency bidirectional communication
-- **OpenAI/Claude/Deepseek APIs**: AI conversation capabilities (all with streaming support)
+- **OpenAI SDK**: Used for OpenAI and Deepseek (via compatible API) calls
+- **Fetch API**: Used for Claude API calls
+- **AbortController**: Used for interrupting AI response streams
 
 ## 🎯 Use Cases
 
@@ -271,7 +292,7 @@ audio-to-text-transcriber/
 - 🎙️ **Podcast Transcription**: Convert podcast content to text
 - 📺 **Video Subtitles**: Generate real-time subtitles for videos
 - 📚 **Study Notes**: Record spoken content from online courses
-- 💬 **AI Voice Assistant**: Interact with AI through natural speech
+- 💬 **AI Voice Assistant**: Interact with AI through natural speech with interruption capabilities
 - 🗣️ **Translation Assistant**: Transcribe and understand foreign language audio
 
 ## 🐛 Troubleshooting
@@ -324,6 +345,14 @@ ffmpeg -version
 2. Make sure you're using the latest version of the code with unified streaming implementation
 3. Set the correct `DEEPSEEK_ENDPOINT` in your environment variables
 
+### Problem: Interruption Feature Not Working
+
+**Solution**:
+1. Confirm that `ALLOW_INTERRUPTION=true` is set correctly in your `.env` file
+2. Adjust the `INTERRUPTION_DETECTION_MS` value (e.g., set to 500) for more sensitive interruption detection
+3. Ensure your microphone is working correctly and can capture your voice
+4. Check if your `package.json` includes the latest dependencies, especially the `openai` SDK
+
 ## 📊 Performance Optimization
 
 - **Sample Rate**: Default 16kHz, can increase to 48kHz for better quality
@@ -333,6 +362,7 @@ ffmpeg -version
   - `nova`: Balanced performance
   - `base`: Fastest speed
 - **Silence Detection**: Adjust `SILENCE_TIMEOUT_MS` value (1000-2500ms) to optimize Q&A experience
+- **Interruption Sensitivity**: Adjust `INTERRUPTION_DETECTION_MS` value (200-500ms) for more sensitive or stable interruption experience
 - **Partial Updates**: Set `PARTIAL_SEND=false` to reduce network requests
 - **AI Model Selection**:
   - Adjust models via `OPENAI_MODEL`, `CLAUDE_MODEL`, and `DEEPSEEK_MODEL` environment variables
@@ -347,12 +377,13 @@ ffmpeg -version
 ## Future Improvements
 
 1. **TypeScript Refactoring**: Add type safety and code maintainability
-2. **Official SDK Integration**: Replace custom HTTP requests with official SDKs (like `openai`, `@anthropic/sdk`)
+2. **Official SDK Integration**: Replace custom HTTP requests with official SDKs (like `@anthropic/sdk`)
 3. **More Accurate VAD**: Integrate real Voice Activity Detection
 4. **Session Management**: Persist conversation history for context understanding
 5. **Log Rotation**: Automatically archive logs by date to avoid large files
 6. **Web Interface**: Add a simple Web UI for easier use and configuration
 7. **Multi-platform Support**: Extend support to Windows and Linux
+8. **Voice Synthesis**: Integrate TTS to convert AI responses back to speech
 
 ## 📄 License
 
