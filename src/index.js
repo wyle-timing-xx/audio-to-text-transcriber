@@ -43,7 +43,11 @@ const CONFIG = {
   // 静默检测（毫秒） — 在无新转录片段的情况下判定用户已结束一句话
   silenceTimeoutMs: parseInt(process.env.SILENCE_TIMEOUT_MS || '1500', 10),
   // 部分上报策略：每当接收到一个 transcript chunk 就发送到 AI 的"记录"接口；最终在 silenceTimeout 触发完整提问
-  partialSend: process.env.PARTIAL_SEND !== 'false'
+  partialSend: process.env.PARTIAL_SEND !== 'false',
+  // 中断检测时间（毫秒）- 在 AI 回答过程中，检测到新的音频输入后，等待此时间，若无更多输入则中断 AI
+  interruptionDetectionMs: parseInt(process.env.INTERRUPTION_DETECTION_MS || '300', 10),
+  // 是否允许中断 AI 回答
+  allowInterruption: process.env.ALLOW_INTERRUPTION !== 'false'
 };
 
 // 验证必需配置
@@ -71,6 +75,32 @@ if (CONFIG.saveToFile) {
   mkdirSync(dirname(CONFIG.qaOutputFile), { recursive: true });
 }
 
+// 创建可中断控制的 AbortController
+class InterruptibleController {
+  constructor() {
+    this.controller = new AbortController();
+    this.interrupted = false;
+  }
+
+  abort() {
+    this.interrupted = true;
+    this.controller.abort();
+  }
+
+  get signal() {
+    return this.controller.signal;
+  }
+
+  isInterrupted() {
+    return this.interrupted;
+  }
+
+  reset() {
+    this.controller = new AbortController();
+    this.interrupted = false;
+  }
+}
+
 class AIManager {
   constructor(config) {
     this.config = config;
@@ -79,6 +109,10 @@ class AIManager {
     this.conversationHistory = []; // [{role, content, timestamp}]
     this.silenceTimer = null;
     this.isProcessing = false; // 是否正在等待 AI 最终回答
+    this.currentController = new InterruptibleController(); // 可中断控制器
+    this.interruptionTimer = null; // 中断检测计时器
+    this.lastUserInputTime = Date.now(); // 上次用户输入时间
+    this.hasNewUserInput = false; // 是否有新的用户输入
     
     // 初始化 OpenAI 客户端 (用于 Deepseek 和 OpenAI)
     if (this.provider === 'openai') {
@@ -103,6 +137,15 @@ class AIManager {
     // 记录增量到会话历史（但标注为 partial）
     this.conversationHistory.push({ role: 'user_partial', content: text, timestamp: ts });
 
+    // 更新最后用户输入时间
+    this.lastUserInputTime = Date.now();
+    this.hasNewUserInput = true;
+
+    // 如果允许中断，且 AI 正在回答，则准备中断
+    if (this.config.allowInterruption && this.isProcessing) {
+      this._prepareInterruption();
+    }
+
     if (this.config.partialSend) {
       // 轻量化上报：可选择把 partial 发送给 AI 做上下文记录（非请求答案）
       // 我们实现为一个 "note" call to provider — provider 可以忽略或记录
@@ -118,6 +161,39 @@ class AIManager {
     this._resetSilenceTimer();
   }
 
+  // 准备中断 AI 回答
+  _prepareInterruption() {
+    // 清除之前的中断计时器
+    if (this.interruptionTimer) {
+      clearTimeout(this.interruptionTimer);
+    }
+
+    // 设置新的中断计时器
+    this.interruptionTimer = setTimeout(() => {
+      // 如果计时器触发，且在检测时间内没有新的输入，则执行中断
+      if (Date.now() - this.lastUserInputTime >= this.config.interruptionDetectionMs) {
+        this._interruptAIResponse();
+      }
+    }, this.config.interruptionDetectionMs);
+  }
+
+  // 中断 AI 回答
+  _interruptAIResponse() {
+    if (!this.isProcessing || !this.hasNewUserInput) return;
+    
+    console.log("\n\n🔄 检测到新输入，中断当前 AI 回答...\n");
+    if (this.config.saveToFile) {
+      appendFileSync(this.config.qaOutputFile, "\n\n[中断：检测到新输入]\n\n");
+    }
+
+    // 中断当前的 AI 响应
+    this.currentController.abort();
+    
+    // 重置状态以准备处理新的用户输入
+    this.hasNewUserInput = false;
+    // 此时不重置 isProcessing，因为 _onSilenceTimeout 中会等待静默后再处理新的问题
+  }
+
   _resetSilenceTimer() {
     if (this.silenceTimer) clearTimeout(this.silenceTimer);
     this.silenceTimer = setTimeout(() => this._onSilenceTimeout(), this.config.silenceTimeoutMs);
@@ -125,18 +201,41 @@ class AIManager {
 
   async _onSilenceTimeout() {
     // 超过静默阈值，认定一句"用户话"结束 → 触发最终问答
-    if (!this.buffer || this.isProcessing) {
+    if (!this.buffer) {
+      return;
+    }
+    
+    // 如果当前有 AI 正在回答且被中断了，等待中断完成
+    if (this.isProcessing && this.currentController.isInterrupted()) {
+      // 稍微延迟一下，等待中断完成
+      setTimeout(() => this._onSilenceTimeout(), 100);
+      return;
+    }
+    
+    // 如果当前有 AI 正在回答但没有被中断，则不处理新的问题
+    if (this.isProcessing && !this.currentController.isInterrupted()) {
       this.buffer = '';
       return;
     }
+    
     const question = this.buffer.trim();
     this.buffer = '';
+    
     // add final user message
     this.conversationHistory.push({ role: 'user', content: question, timestamp: new Date().toISOString() });
+    
     // call AI for answer
     try {
       this.isProcessing = true;
+      this.currentController.reset(); // 重置控制器为新的回答做准备
+      this.hasNewUserInput = false; // 重置新输入标志
       await this.getAnswerForQuestion(question);
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log("AI 回答被中断");
+      } else {
+        console.error("AI 回答出错:", error);
+      }
     } finally {
       this.isProcessing = false;
     }
@@ -182,62 +281,107 @@ class AIManager {
     // Dispatch to provider
     let partialAnswer = '';
     try {
-      // 统一使用 streamCompletion 方法处理所有 AI provider
-      partialAnswer = await this._streamCompletion(messages);
+      // 统一使用 streamCompletion 方法处理所有 AI provider，并传入中断控制器
+      partialAnswer = await this._streamCompletion(messages, this.currentController);
     } catch (error) {
-      console.error(`❌ ${this.provider.toUpperCase()} error:`, error.message);
-      if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, `${this.provider.toUpperCase()} error: ${error.message}\n`);
+      if (error.name === 'AbortError') {
+        // 正常中断，记录中断信息
+        if (this.config.saveToFile) {
+          appendFileSync(this.config.qaOutputFile, `\n[回答被中断]\n`);
+        }
+        // 将中断的回答添加到会话历史
+        this.conversationHistory.push({
+          role: 'assistant',
+          content: `${partialAnswer} [回答被中断]`,
+          timestamp: new Date().toISOString(),
+          interrupted: true
+        });
+        return partialAnswer;
+      } else {
+        // 其他错误
+        console.error(`❌ ${this.provider.toUpperCase()} error:`, error.message);
+        if (this.config.saveToFile) {
+          appendFileSync(this.config.qaOutputFile, `${this.provider.toUpperCase()} error: ${error.message}\n`);
+        }
+      }
     }
 
-    this.conversationHistory.push({ role: 'assistant', content: partialAnswer, timestamp: new Date().toISOString() });
+    if (!this.currentController.isInterrupted()) {
+      this.conversationHistory.push({
+        role: 'assistant',
+        content: partialAnswer,
+        timestamp: new Date().toISOString()
+      });
+      
+      const endTs = new Date().toISOString();
+      if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, `\n=== QA Session Ended: ${endTs} ===\n`);
+    }
     
-    const endTs = new Date().toISOString();
-    if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, `\n=== QA Session Ended: ${endTs} ===\n`);
+    return partialAnswer;
   }
 
   // 统一的流式调用方法，根据 provider 类型调用不同的实现
-  async _streamCompletion(messages) {
+  async _streamCompletion(messages, controller) {
     switch (this.provider) {
       case 'openai':
-        return await this._streamOpenAI(messages);
+        return await this._streamOpenAI(messages, controller);
       case 'claude':
-        return await this._streamClaude(messages);
+        return await this._streamClaude(messages, controller);
       case 'deepseek':
-        return await this._streamDeepseekWithSDK(messages);
+        return await this._streamDeepseekWithSDK(messages, controller);
       default:
         throw new Error(`Unknown AI provider: ${this.provider}`);
     }
   }
 
-  // 处理 Reader 流的通用方法
-  async _processStream(reader, textDecoder, parseChunk) {
+  // 处理 Reader 流的通用方法，添加中断支持
+  async _processStream(reader, textDecoder, parseChunk, controller) {
     let done = false;
     let partialAnswer = '';
     
-    while (!done) {
-      const { value, done: readerDone } = await reader.read();
-      done = readerDone;
-      
-      if (value) {
-        const chunk = textDecoder.decode(value, { stream: true });
-        const tokens = parseChunk(chunk);
+    try {
+      while (!done) {
+        // 检查是否被中断
+        if (controller.isInterrupted()) {
+          reader.cancel();
+          throw new DOMException('Stream processing aborted', 'AbortError');
+        }
         
-        for (const token of tokens) {
-          if (token) {
-            process.stdout.write(token);
-            partialAnswer += token;
-            if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, token);
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        
+        if (value) {
+          const chunk = textDecoder.decode(value, { stream: true });
+          const tokens = parseChunk(chunk);
+          
+          for (const token of tokens) {
+            // 每处理一个 token 也检查是否被中断
+            if (controller.isInterrupted()) {
+              reader.cancel();
+              throw new DOMException('Stream processing aborted', 'AbortError');
+            }
+            
+            if (token) {
+              process.stdout.write(token);
+              partialAnswer += token;
+              if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, token);
+            }
           }
         }
       }
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw error; // 重新抛出中断错误
+      }
+      console.error('Stream processing error:', error);
     }
     
-    if (this.config.logToConsole) console.log('\n'); // Add a newline after streaming
+    if (this.config.logToConsole && !controller.isInterrupted()) console.log('\n');
     return partialAnswer;
   }
 
-  // OpenAI 流式实现 (使用 v1 completions API)
-  async _streamOpenAI(messages) {
+  // OpenAI 流式实现 (使用 v1 completions API)，添加中断支持
+  async _streamOpenAI(messages, controller) {
     const apiKey = this.config.openaiApiKey;
     const url = 'https://api.openai.com/v1/chat/completions';
 
@@ -255,7 +399,8 @@ class AIManager {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: controller.signal
     });
 
     if (!res.ok) {
@@ -288,11 +433,11 @@ class AIManager {
       }
       
       return tokens;
-    });
+    }, controller);
   }
 
-  // Claude 流式实现
-  async _streamClaude(messages) {
+  // Claude 流式实现，添加中断支持
+  async _streamClaude(messages, controller) {
     const apiKey = this.config.claudeApiKey;
     
     // 构建 API 请求
@@ -322,7 +467,8 @@ class AIManager {
         'anthropic-version': '2023-06-01',
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: controller.signal
     });
 
     if (!res.ok) {
@@ -357,11 +503,11 @@ class AIManager {
       }
       
       return tokens;
-    });
+    }, controller);
   }
 
-  // 使用 OpenAI SDK 调用 Deepseek API（流式）
-  async _streamDeepseekWithSDK(messages) {
+  // 使用 OpenAI SDK 调用 Deepseek API（流式），添加中断支持
+  async _streamDeepseekWithSDK(messages, controller) {
     try {
       // 使用 OpenAI SDK 创建流式对话完成
       const stream = await this.openai.chat.completions.create({
@@ -372,12 +518,17 @@ class AIManager {
         })),
         stream: true,
         temperature: 0.2
-      });
+      }, { signal: controller.signal });
 
       let fullText = '';
 
       // 处理流式响应
       for await (const chunk of stream) {
+        // 检查是否被中断
+        if (controller.isInterrupted()) {
+          throw new DOMException('Stream processing aborted', 'AbortError');
+        }
+        
         const content = chunk.choices[0]?.delta?.content || '';
         if (content) {
           process.stdout.write(content);
@@ -390,9 +541,12 @@ class AIManager {
         }
       }
 
-      if (this.config.logToConsole) console.log('\n'); // 流结束后添加换行
+      if (this.config.logToConsole && !controller.isInterrupted()) console.log('\n'); // 流结束后添加换行
       return fullText;
     } catch (error) {
+      if (error.name === 'AbortError') {
+        throw error; // 重新抛出中断错误
+      }
       throw new Error(`Deepseek API error: ${error.message}`);
     }
   }
@@ -537,6 +691,9 @@ class AudioTranscriber {
       console.log('='.repeat(50));
       console.log('✅ Transcription service started successfully!');
       console.log(`🤖 AI Provider: ${this.config.aiProvider.toUpperCase()}`);
+      if (this.config.allowInterruption) {
+        console.log(`⚡ 中断功能已启用: 在 AI 回答时说话可以打断 AI`);
+      }
       console.log('Press Ctrl+C to stop\n');
 
     } catch (error) {
