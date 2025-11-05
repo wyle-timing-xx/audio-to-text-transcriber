@@ -31,14 +31,14 @@ class AIManager {
     this.lastUserInputTime = Date.now();
     this.hasNewUserInput = true;
 
-    // 如果允许中断，且 AI 正在回答，则准备中断
+    // 如果允许中断，且 AI 正在回答，则立即中断
     if (this.config.interruption.enabled && this.isProcessing) {
-      this._prepareInterruption();
+      // 立即中断当前回答，无需等待
+      this._interruptAIResponse();
     }
 
     if (this.config.ai.partialSend) {
       // 轻量化上报：可选择把 partial 发送给 AI 做上下文记录（非请求答案）
-      // 我们实现为一个 "note" call to provider — provider 可以忽略或记录
       try {
         await this.provider.notifyPartial(text);
       } catch (e) {
@@ -51,36 +51,18 @@ class AIManager {
     this._resetSilenceTimer();
   }
 
-  // 准备中断 AI 回答
-  _prepareInterruption() {
-    // 清除之前的中断计时器
-    if (this.interruptionTimer) {
-      clearTimeout(this.interruptionTimer);
-    }
-
-    // 设置新的中断计时器
-    this.interruptionTimer = setTimeout(() => {
-      // 如果计时器触发，且在检测时间内没有新的输入，则执行中断
-      if (Date.now() - this.lastUserInputTime >= this.config.interruption.detectionTimeMs) {
-        this._interruptAIResponse();
-      }
-    }, this.config.interruption.detectionTimeMs);
-  }
-
   // 中断 AI 回答
   _interruptAIResponse() {
-    if (!this.isProcessing || !this.hasNewUserInput) return;
+    if (!this.isProcessing) return;
     
-    console.log("\n\n🔄 检测到新输入，中断当前 AI 回答...\n");
+    console.log("\n\n🔄 检测到音频输入，立即中断当前 AI 回答...\n");
     if (this.config.output.saveToFile) {
-      appendFileSync(this.config.output.qaOutputFile, "\n\n[中断：检测到新输入]\n\n");
+      appendFileSync(this.config.output.qaOutputFile, "\n\n[中断：检测到音频输入]\n\n");
     }
 
     // 中断当前的 AI 响应
     this.currentController.abort();
     
-    // 重置状态以准备处理新的用户输入
-    this.hasNewUserInput = false;
     // 此时不重置 isProcessing，因为 _onSilenceTimeout 中会等待静默后再处理新的问题
   }
 
