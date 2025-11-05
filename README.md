@@ -5,8 +5,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
 
-[English](./README_EN.md) | 中文
-
 ## ✨ 特性
 
 - 🔴 **实时转录**：边采集边转换，无延迟处理
@@ -18,6 +16,7 @@
 - 💾 **自动保存**：转录结果和 AI 对话实时保存到文件
 - 📊 **时间戳**：每条转录都带有精确时间戳
 - 🎛️ **灵活配置**：通过环境变量轻松自定义
+- 🧩 **模块化架构**：代码重构为模块化设计，便于维护和扩展
 
 ## 📋 前置要求
 
@@ -129,7 +128,7 @@ npm start
 - **Claude**: 使用新版 Messages API 进行流式响应
 - **Deepseek**: 使用 OpenAI SDK 与流式接口，通过兼容 API 实现流式响应
 
-所有提供商现在使用统一的 `_streamCompletion` 架构，提供一致的用户体验。
+所有提供商现在使用统一的 `streamCompletion` 架构，提供一致的用户体验。
 
 ### 🔄 中断功能
 
@@ -246,13 +245,13 @@ INTERRUPTION_DETECTION_MS=300 # 中断检测时间（毫秒）
 ```
 audio-to-text-transcriber/
 ├── src/
-│   ├── index.js           # 主应用程序（转录+AI对话）
-│   └── test-audio.js      # 音频设备测试工具
-├── transcripts/           # 转录输出目录（自动创建）
-├── .env.example          # 环境变量模板
-├── .gitignore            # Git 忽略文件
-├── package.json          # 项目依赖
-└── README.md             # 项目文档
+│   ├── index.js                    # 主应用程序（集成所有模块）
+│   ├── test-audio.js               # 音频设备测试工具
+├── transcripts/                    # 转录输出目录（自动创建）
+├── .env.example                   # 环境变量模板
+├── .gitignore                     # Git 忽略文件
+├── package.json                   # 项目依赖
+└── README.md                      # 项目文档
 ```
 
 ## 🔧 工作原理
