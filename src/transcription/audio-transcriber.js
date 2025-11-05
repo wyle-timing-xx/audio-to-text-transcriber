@@ -16,6 +16,7 @@ class AudioTranscriber {
     this.aiManager = new AIManager(config);
     this.lastTranscriptTime = Date.now(); // 跟踪最后一次收到转录的时间
     this.audioDetected = false; // 音频检测状态
+    this.lastInterruptTime = 0; // 最后一次中断的时间，用于冷却期
   }
 
   initDeepgram() {
@@ -32,8 +33,8 @@ class AudioTranscriber {
       encoding: this.config.audio.encoding,
       sample_rate: this.config.audio.sampleRate,
       channels: this.config.audio.channels,
-      interim_results: true, // 启用中间结果以更快地检测音频
-      vad_turnoff: 500 // 语音活动检测超时（毫秒）
+      interim_results: this.config.deepgram.interimResults, // 启用中间结果以更快地检测音频
+      vad_turnoff: this.config.deepgram.vadTurnoff // 语音活动检测超时（毫秒）
     });
 
     this.deepgramConnection.on(LiveTranscriptionEvents.Open, () => {
@@ -44,11 +45,27 @@ class AudioTranscriber {
     this.deepgramConnection.on(LiveTranscriptionEvents.Transcript, async (data) => {
       // 音频活动状态监控
       this.lastTranscriptTime = Date.now();
+      
+      // 检测到新音频输入
       if (!this.audioDetected) {
         this.audioDetected = true;
-        // 如果是从静默状态切换到有音频输入，并且AI正在回答，立即提示检测到语音
-        if (this.aiManager.isProcessing && this.config.interruption.enabled) {
-          console.log('🔊 检测到语音输入，准备中断AI回答...');
+        
+        // 如果启用了即时中断，AI正在回答，且不在冷却期内，立即中断
+        if (this.config.interruption.enabled && 
+            this.config.interruption.immediateInterrupt &&
+            this.aiManager.isProcessing && 
+            Date.now() - this.lastInterruptTime > this.config.interruption.cooldownMs) {
+          
+          // 中断提示
+          if (this.config.interruption.visualFeedback.enabled) {
+            console.log('🔊 检测到语音输入，立即中断AI回答...');
+          }
+          
+          // 记录中断时间
+          this.lastInterruptTime = Date.now();
+          
+          // 中断AI回答
+          await this.aiManager._interruptAIResponse();
         }
       }
 
@@ -59,9 +76,14 @@ class AudioTranscriber {
 
         // 输出到控制台
         if (this.config.output.logToConsole) {
-          // 如果AI正在回答且启用了中断，使用特殊标记使中断更明显
-          if (this.aiManager.isProcessing && this.config.interruption.enabled) {
-            console.log(`🔴 ${transcript} 🔴`);
+          // 根据配置决定是否使用特殊标记突出显示中断
+          if (this.aiManager.isProcessing && 
+              this.config.interruption.enabled && 
+              this.config.interruption.visualFeedback.enabled &&
+              this.config.interruption.visualFeedback.useColors) {
+            const prefix = this.config.interruption.visualFeedback.interruptPrefix || '🔴';
+            const suffix = this.config.interruption.visualFeedback.interruptSuffix || '🔴';
+            console.log(`${prefix} ${transcript} ${suffix}`);
           } else {
             console.log(`${transcript}`);
           }
@@ -81,8 +103,9 @@ class AudioTranscriber {
       }
     });
 
+    // 监听元数据事件以获取语音活动状态
     this.deepgramConnection.on(LiveTranscriptionEvents.Metadata, (data) => {
-      // 可以监听静默检测
+      // 如果检测到语音段结束
       if (data?.speech?.final && !data?.speech?.speech_final) {
         this.audioDetected = false;
       }
@@ -171,14 +194,23 @@ class AudioTranscriber {
       this.startFFmpegCapture();
 
       // 启动音频活动监控
-      this.startAudioMonitoring();
+      if (this.config.audio.activityDetection.enabled) {
+        this.startAudioMonitoring();
+      }
 
       console.log('='.repeat(50));
       console.log('✅ Transcription service started successfully!');
       console.log(`🤖 AI Provider: ${this.config.ai.provider.toUpperCase()}`);
+      
+      // 中断功能说明
       if (this.config.interruption.enabled) {
-        console.log(`⚡ 增强中断功能已启用: 在AI回答时一检测到声音就会立即中断`);
+        if (this.config.interruption.immediateInterrupt) {
+          console.log(`⚡ 增强中断功能已启用: 在AI回答时一检测到声音就会立即中断`);
+        } else {
+          console.log(`⚡ 中断功能已启用: 在 AI 回答时说话可以打断 AI`);
+        }
       }
+      
       console.log('Press Ctrl+C to stop\n');
 
     } catch (error) {
@@ -189,14 +221,14 @@ class AudioTranscriber {
 
   // 启动音频活动监控
   startAudioMonitoring() {
-    // 定期检查音频活动状态，超过一定时间没有接收到音频转录，则认为没有人说话
+    // 定期检查音频活动状态
     setInterval(() => {
       const silenceTime = Date.now() - this.lastTranscriptTime;
-      // 如果超过500ms没有收到音频输入，将状态重置为无音频
-      if (silenceTime > 500 && this.audioDetected) {
+      // 如果超过配置的静默阈值没有收到音频输入，将状态重置为无音频
+      if (silenceTime > this.config.audio.activityDetection.silenceThresholdMs && this.audioDetected) {
         this.audioDetected = false;
       }
-    }, 200); // 每200ms检查一次音频活动状态
+    }, this.config.audio.activityDetection.checkIntervalMs);
   }
 
   stop() {
