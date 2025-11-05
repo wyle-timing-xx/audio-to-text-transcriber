@@ -4,7 +4,7 @@ import { spawn } from 'child_process';
 import { createWriteStream, mkdirSync, appendFileSync } from 'fs';
 import { dirname } from 'path';
 import dotenv from 'dotenv';
-import fetch from 'node-fetch'; // npm i node-fetch@2 (or use global fetch in newer Node)
+import fetch from 'node-fetch'; // npm i node-fetch@2 (或使用更新版本 Node 中的全局 fetch)
 import OpenAI from 'openai'; // 使用 OpenAI SDK 调用 Deepseek API
 import { pipeline } from 'stream';
 import { promisify } from 'util';
@@ -12,99 +12,539 @@ import { promisify } from 'util';
 // 加载环境变量
 dotenv.config();
 
-// 配置项
-const CONFIG = {
-  deepgramApiKey: process.env.DEEPGRAM_API_KEY,
-  audioDevice: process.env.AUDIO_DEVICE || ':1',
-  language: process.env.LANGUAGE || 'en',
-  model: process.env.MODEL || 'nova-2',
-  smartFormat: process.env.SMART_FORMAT === 'true',
-  punctuate: process.env.PUNCTUATE === 'true',
-  outputFile: process.env.OUTPUT_FILE || 'transcripts/output.txt',
-  qaOutputFile: process.env.QA_OUTPUT_FILE || 'transcripts/qa_output.txt',
-  saveToFile: process.env.SAVE_TO_FILE !== 'false',
-  logToConsole: process.env.LOG_TO_CONSOLE !== 'false',
-  // AI 配置
-  aiProvider: (process.env.AI_PROVIDER || 'openai').toLowerCase(), // openai | claude | deepseek
-  openaiApiKey: process.env.OPENAI_API_KEY,
-  claudeApiKey: process.env.CLAUDE_API_KEY,
-  deepseekApiKey: process.env.DEEPSEEK_API_KEY,
-  deepseekEndpoint: process.env.DEEPSEEK_ENDPOINT || 'https://api.deepseek.com', // 默认使用官方 API 地址
-  // AI 模型配置
-  openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-  claudeModel: process.env.CLAUDE_MODEL || 'claude-3-opus-20240229',
-  deepseekModel: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-  // prompt / behavior
-  aiSystemPrompt: process.env.AI_SYSTEM_PROMPT || `你是一个智能问答助手。当前对话为"语音问答"。要求：
+// 默认配置
+const defaultConfig = {
+  // Deepgram 配置
+  deepgram: {
+    apiKey: null, // 必须通过环境变量提供
+    language: 'en',
+    model: 'nova-2',
+    smartFormat: true,
+    punctuate: true
+  },
+  
+  // 音频配置
+  audio: {
+    device: ':1',
+    encoding: 'linear16',
+    sampleRate: 16000,
+    channels: 1
+  },
+  
+  // 输出配置
+  output: {
+    transcriptFile: 'transcripts/output.txt',
+    qaOutputFile: 'transcripts/qa_output.txt',
+    saveToFile: true,
+    logToConsole: true
+  },
+
+  // AI 提供商配置
+  ai: {
+    provider: 'openai', // openai | claude | deepseek
+    // API Keys (必须通过环境变量提供)
+    openaiApiKey: null,
+    claudeApiKey: null, 
+    deepseekApiKey: null,
+    deepseekEndpoint: 'https://api.deepseek.com',
+    
+    // 模型配置
+    models: {
+      openai: 'gpt-4o-mini',
+      claude: 'claude-3-opus-20240229',
+      deepseek: 'deepseek-chat'
+    },
+    
+    // 系统提示词
+    systemPrompt: `你是一个智能问答助手。当前对话为"语音问答"。要求：
 1) 这是用户说出的语音转为文字后的内容，判定用户是否已经问完（可依据停顿/标点），如果未问完请等待更多输入；如果已问完请直接以回答者角色给出回答。
 2) 回答要简洁、准确，必要时给出步骤/提示。
 3) 如果用户有后续问题，请在结尾提示用户可以继续追问。
 `,
-  // 静默检测（毫秒） — 在无新转录片段的情况下判定用户已结束一句话
-  silenceTimeoutMs: parseInt(process.env.SILENCE_TIMEOUT_MS || '1500', 10),
-  // 部分上报策略：每当接收到一个 transcript chunk 就发送到 AI 的"记录"接口；最终在 silenceTimeout 触发完整提问
-  partialSend: process.env.PARTIAL_SEND !== 'false',
-  // 中断检测时间（毫秒）- 在 AI 回答过程中，检测到新的音频输入后，等待此时间，若无更多输入则中断 AI
-  interruptionDetectionMs: parseInt(process.env.INTERRUPTION_DETECTION_MS || '300', 10),
-  // 是否允许中断 AI 回答
-  allowInterruption: process.env.ALLOW_INTERRUPTION !== 'false'
+    // 静默检测时间（毫秒）
+    silenceTimeoutMs: 1500,
+    
+    // 是否使用部分上报
+    partialSend: true
+  },
+  
+  // 中断功能配置
+  interruption: {
+    enabled: true,
+    detectionTimeMs: 300
+  }
 };
 
-// 验证必需配置
-if (!CONFIG.deepgramApiKey) {
-  console.error('❌ Error: DEEPGRAM_API_KEY is not set in .env file');
-  process.exit(1);
+// 加载并验证配置
+function loadConfig() {
+  // 从环境变量加载配置
+  const config = {
+    // Deepgram 配置
+    deepgram: {
+      apiKey: process.env.DEEPGRAM_API_KEY,
+      language: process.env.LANGUAGE || defaultConfig.deepgram.language,
+      model: process.env.MODEL || defaultConfig.deepgram.model,
+      smartFormat: process.env.SMART_FORMAT === 'true' || defaultConfig.deepgram.smartFormat,
+      punctuate: process.env.PUNCTUATE === 'true' || defaultConfig.deepgram.punctuate
+    },
+    
+    // 音频配置
+    audio: {
+      device: process.env.AUDIO_DEVICE || defaultConfig.audio.device,
+      encoding: defaultConfig.audio.encoding,
+      sampleRate: defaultConfig.audio.sampleRate,
+      channels: defaultConfig.audio.channels
+    },
+    
+    // 输出配置
+    output: {
+      transcriptFile: process.env.OUTPUT_FILE || defaultConfig.output.transcriptFile,
+      qaOutputFile: process.env.QA_OUTPUT_FILE || defaultConfig.output.qaOutputFile,
+      saveToFile: process.env.SAVE_TO_FILE !== 'false' && defaultConfig.output.saveToFile,
+      logToConsole: process.env.LOG_TO_CONSOLE !== 'false' && defaultConfig.output.logToConsole
+    },
+    
+    // AI 配置
+    ai: {
+      provider: (process.env.AI_PROVIDER || defaultConfig.ai.provider).toLowerCase(),
+      openaiApiKey: process.env.OPENAI_API_KEY,
+      claudeApiKey: process.env.CLAUDE_API_KEY,
+      deepseekApiKey: process.env.DEEPSEEK_API_KEY,
+      deepseekEndpoint: process.env.DEEPSEEK_ENDPOINT || defaultConfig.ai.deepseekEndpoint,
+      
+      // 模型配置
+      models: {
+        openai: process.env.OPENAI_MODEL || defaultConfig.ai.models.openai,
+        claude: process.env.CLAUDE_MODEL || defaultConfig.ai.models.claude,
+        deepseek: process.env.DEEPSEEK_MODEL || defaultConfig.ai.models.deepseek
+      },
+      
+      // 系统提示词
+      systemPrompt: process.env.AI_SYSTEM_PROMPT || defaultConfig.ai.systemPrompt,
+      
+      // 静默检测时间
+      silenceTimeoutMs: parseInt(process.env.SILENCE_TIMEOUT_MS || defaultConfig.ai.silenceTimeoutMs, 10),
+      
+      // 是否使用部分上报
+      partialSend: process.env.PARTIAL_SEND !== 'false' && defaultConfig.ai.partialSend
+    },
+    
+    // 中断功能配置
+    interruption: {
+      enabled: process.env.ALLOW_INTERRUPTION !== 'false' && defaultConfig.interruption.enabled,
+      detectionTimeMs: parseInt(process.env.INTERRUPTION_DETECTION_MS || defaultConfig.interruption.detectionTimeMs, 10)
+    }
+  };
+
+  // 验证必要配置
+  validateConfig(config);
+
+  return config;
 }
 
-if (CONFIG.aiProvider === 'openai' && !CONFIG.openaiApiKey) {
-  console.error('❌ Error: OPENAI_API_KEY required for OpenAI provider');
-  process.exit(1);
-}
-if (CONFIG.aiProvider === 'claude' && !CONFIG.claudeApiKey) {
-  console.error('❌ Error: CLAUDE_API_KEY required for Claude provider');
-  process.exit(1);
-}
-if (CONFIG.aiProvider === 'deepseek' && !CONFIG.deepseekApiKey) {
-  console.error('❌ Error: DEEPSEEK_API_KEY required for Deepseek provider');
-  process.exit(1);
+// 验证配置是否有效
+function validateConfig(config) {
+  // 验证 Deepgram API Key
+  if (!config.deepgram.apiKey) {
+    throw new Error('❌ Error: DEEPGRAM_API_KEY is not set in .env file');
+  }
+
+  // 根据选择的 AI 提供商验证 API Key
+  if (config.ai.provider === 'openai' && !config.ai.openaiApiKey) {
+    throw new Error('❌ Error: OPENAI_API_KEY required for OpenAI provider');
+  }
+  if (config.ai.provider === 'claude' && !config.ai.claudeApiKey) {
+    throw new Error('❌ Error: CLAUDE_API_KEY required for Claude provider');
+  }
+  if (config.ai.provider === 'deepseek' && !config.ai.deepseekApiKey) {
+    throw new Error('❌ Error: DEEPSEEK_API_KEY required for Deepseek provider');
+  }
 }
 
-// 创建输出目录
-if (CONFIG.saveToFile) {
-  mkdirSync(dirname(CONFIG.outputFile), { recursive: true });
-  mkdirSync(dirname(CONFIG.qaOutputFile), { recursive: true });
+// 流处理工具函数
+
+// 处理 Reader 流的通用方法，带中断支持
+async function processStream(reader, textDecoder, parseChunk, controller, outputHandler) {
+  let done = false;
+  let fullText = '';
+  
+  try {
+    while (!done) {
+      // 检查是否被中断
+      if (controller.isInterrupted()) {
+        reader.cancel();
+        throw new DOMException('Stream processing aborted', 'AbortError');
+      }
+      
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      
+      if (value) {
+        const chunk = textDecoder.decode(value, { stream: true });
+        const tokens = parseChunk(chunk);
+        
+        for (const token of tokens) {
+          // 每处理一个 token 也检查是否被中断
+          if (controller.isInterrupted()) {
+            reader.cancel();
+            throw new DOMException('Stream processing aborted', 'AbortError');
+          }
+          
+          if (token) {
+            // 使用输出处理器处理 token
+            outputHandler(token);
+            fullText += token;
+          }
+        }
+      }
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw error; // 重新抛出中断错误
+    }
+    console.error('Stream processing error:', error);
+  }
+  
+  return fullText;
 }
 
-// 创建可中断控制的 AbortController
+// 解析 OpenAI 流响应
+function parseOpenAIStream(chunk) {
+  const tokens = [];
+  const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0);
+  
+  for (const line of lines) {
+    if (line.startsWith('data: ')) {
+      const payload = line.replace(/^data: /, '');
+      if (payload === '[DONE]') continue;
+      
+      try {
+        const parsed = JSON.parse(payload);
+        const token = parsed.choices?.[0]?.delta?.content || '';
+        if (token) tokens.push(token);
+      } catch (e) {
+        // 忽略 JSON 解析错误
+      }
+    }
+  }
+  
+  return tokens;
+}
+
+// 解析 Claude 流响应
+function parseClaudeStream(chunk) {
+  const tokens = [];
+  const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0);
+  
+  for (const line of lines) {
+    if (line.startsWith('data: ')) {
+      const payload = line.replace(/^data: /, '');
+      if (payload === '[DONE]') continue;
+      
+      try {
+        const parsed = JSON.parse(payload);
+        // 新版 Claude API 在 delta.text 中返回 token
+        const token = parsed.delta?.text || '';
+        if (token) tokens.push(token);
+      } catch (e) {
+        // 非 JSON 行，可能是普通文本（旧版API）
+        if (line !== 'data: [DONE]') tokens.push(line);
+      }
+    }
+  }
+  
+  return tokens;
+}
+
+// 中断控制器类
 class InterruptibleController {
+  // 创建一个可中断控制器
   constructor() {
     this.controller = new AbortController();
     this.interrupted = false;
   }
 
+  // 中断当前操作
   abort() {
     this.interrupted = true;
     this.controller.abort();
   }
 
+  // 获取 AbortSignal
   get signal() {
     return this.controller.signal;
   }
 
+  // 检查是否已被中断
   isInterrupted() {
     return this.interrupted;
   }
 
+  // 重置控制器状态
   reset() {
     this.controller = new AbortController();
     this.interrupted = false;
   }
 }
 
+// AI 提供商基类
+class BaseProvider {
+  // 创建 AI 提供商实例
+  constructor(config) {
+    this.config = config;
+    
+    if (new.target === BaseProvider) {
+      throw new TypeError("Cannot instantiate BaseProvider directly");
+    }
+  }
+
+  // 获取提供商名称
+  getName() {
+    throw new Error("Method 'getName()' must be implemented");
+  }
+
+  // 初始化 AI 提供商
+  initialize() {
+    throw new Error("Method 'initialize()' must be implemented");
+  }
+
+  // 发送部分转录片段（可选实现）
+  async notifyPartial(text) {
+    // 默认空实现，子类可以覆盖
+    return Promise.resolve();
+  }
+
+  // 流式获取问题的回答
+  async streamCompletion(messages, controller) {
+    throw new Error("Method 'streamCompletion()' must be implemented");
+  }
+}
+
+// OpenAI 提供商实现
+class OpenAIProvider extends BaseProvider {
+  constructor(config) {
+    super(config);
+    this.openai = new OpenAI({
+      apiKey: config.ai.openaiApiKey
+    });
+  }
+
+  getName() {
+    return 'openai';
+  }
+
+  initialize() {
+    // 已经在构造函数中初始化了
+  }
+
+  async notifyPartial(text) {
+    // OpenAI 不支持部分通知，使用空实现
+    return Promise.resolve();
+  }
+
+  async streamCompletion(messages, controller) {
+    const apiKey = this.config.ai.openaiApiKey;
+    const url = 'https://api.openai.com/v1/chat/completions';
+
+    // 请求 stream=true 并解析 SSE 流
+    const body = {
+      model: this.config.ai.models.openai,
+      messages: messages,
+      temperature: 0.2,
+      stream: true
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP error ${res.status}: ${text}`);
+    }
+
+    // 使用通用流处理方法
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    
+    // 输出处理函数
+    const outputHandler = (token) => {
+      process.stdout.write(token);
+      if (this.config.output.saveToFile) {
+        appendFileSync(this.config.output.qaOutputFile, token);
+      }
+    };
+    
+    return await processStream(reader, decoder, parseOpenAIStream, controller, outputHandler);
+  }
+}
+
+// Claude 提供商实现
+class ClaudeProvider extends BaseProvider {
+  constructor(config) {
+    super(config);
+  }
+
+  getName() {
+    return 'claude';
+  }
+
+  initialize() {
+    // 不需要初始化
+  }
+
+  async notifyPartial(text) {
+    // Claude 不支持部分通知，使用空实现
+    return Promise.resolve();
+  }
+
+  async streamCompletion(messages, controller) {
+    const apiKey = this.config.ai.claudeApiKey;
+    
+    // 构建 API 请求
+    // 注意：Claude API 从旧版的 v1/complete 已更新到 v1/messages
+    const url = 'https://api.anthropic.com/v1/messages';
+    
+    // 转换消息格式为 Claude 格式
+    const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
+    const userMessages = messages.filter(m => m.role !== 'system');
+    
+    const body = {
+      model: this.config.ai.models.claude,
+      system: systemPrompt,
+      messages: userMessages.map(m => ({
+        role: m.role,
+        content: m.content
+      })),
+      max_tokens: 800,
+      temperature: 0.2,
+      stream: true
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP error ${res.status}: ${text}`);
+    }
+
+    // 使用通用流处理方法
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    
+    // 输出处理函数
+    const outputHandler = (token) => {
+      process.stdout.write(token);
+      if (this.config.output.saveToFile) {
+        appendFileSync(this.config.output.qaOutputFile, token);
+      }
+    };
+    
+    return await processStream(reader, decoder, parseClaudeStream, controller, outputHandler);
+  }
+}
+
+// Deepseek 提供商实现
+class DeepseekProvider extends BaseProvider {
+  constructor(config) {
+    super(config);
+    this.openai = new OpenAI({
+      baseURL: config.ai.deepseekEndpoint,
+      apiKey: config.ai.deepseekApiKey
+    });
+  }
+
+  getName() {
+    return 'deepseek';
+  }
+
+  initialize() {
+    // 已经在构造函数中初始化了
+  }
+
+  async notifyPartial(text) {
+    // Deepseek 不支持部分通知，使用空实现
+    return Promise.resolve();
+  }
+
+  async streamCompletion(messages, controller) {
+    try {
+      // 使用 OpenAI SDK 创建流式对话完成
+      const stream = await this.openai.chat.completions.create({
+        model: this.config.ai.models.deepseek,
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        })),
+        stream: true,
+        temperature: 0.2
+      }, { signal: controller.signal });
+
+      let fullText = '';
+
+      // 处理流式响应
+      for await (const chunk of stream) {
+        // 检查是否被中断
+        if (controller.isInterrupted()) {
+          throw new DOMException('Stream processing aborted', 'AbortError');
+        }
+        
+        const content = chunk.choices[0]?.delta?.content || '';
+        if (content) {
+          process.stdout.write(content);
+          fullText += content;
+          
+          // 保存到文件
+          if (this.config.output.saveToFile) {
+            appendFileSync(this.config.output.qaOutputFile, content);
+          }
+        }
+      }
+
+      if (this.config.output.logToConsole && !controller.isInterrupted()) console.log('\n'); // 流结束后添加换行
+      return fullText;
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw error; // 重新抛出中断错误
+      }
+      throw new Error(`Deepseek API error: ${error.message}`);
+    }
+  }
+}
+
+// 创建 AI 提供商
+function createProvider(provider, config) {
+  switch (provider) {
+    case 'openai':
+      return new OpenAIProvider(config);
+    case 'claude':
+      return new ClaudeProvider(config);
+    case 'deepseek':
+      return new DeepseekProvider(config);
+    default:
+      throw new Error(`未知 AI 提供商: ${provider}`);
+  }
+}
+
 class AIManager {
   constructor(config) {
     this.config = config;
-    this.provider = config.aiProvider;
+    this.provider = createProvider(config.ai.provider, config);
     this.buffer = ''; // 当前问题缓冲（增量拼接）
     this.conversationHistory = []; // [{role, content, timestamp}]
     this.silenceTimer = null;
@@ -113,18 +553,6 @@ class AIManager {
     this.interruptionTimer = null; // 中断检测计时器
     this.lastUserInputTime = Date.now(); // 上次用户输入时间
     this.hasNewUserInput = false; // 是否有新的用户输入
-    
-    // 初始化 OpenAI 客户端 (用于 Deepseek 和 OpenAI)
-    if (this.provider === 'openai') {
-      this.openai = new OpenAI({
-        apiKey: config.openaiApiKey
-      });
-    } else if (this.provider === 'deepseek') {
-      this.openai = new OpenAI({
-        baseURL: config.deepseekEndpoint,
-        apiKey: config.deepseekApiKey
-      });
-    }
   }
 
   // 将 fragment 添加到 buffer，并（可选）做 partial send（记录/上下文）
@@ -142,15 +570,15 @@ class AIManager {
     this.hasNewUserInput = true;
 
     // 如果允许中断，且 AI 正在回答，则准备中断
-    if (this.config.allowInterruption && this.isProcessing) {
+    if (this.config.interruption.enabled && this.isProcessing) {
       this._prepareInterruption();
     }
 
-    if (this.config.partialSend) {
+    if (this.config.ai.partialSend) {
       // 轻量化上报：可选择把 partial 发送给 AI 做上下文记录（非请求答案）
       // 我们实现为一个 "note" call to provider — provider 可以忽略或记录
       try {
-        await this._notifyProviderOfPartial(text);
+        await this.provider.notifyPartial(text);
       } catch (e) {
         // 不阻塞主流程
         console.error('⚠️ Partial send failed:', e.message || e);
@@ -171,10 +599,10 @@ class AIManager {
     // 设置新的中断计时器
     this.interruptionTimer = setTimeout(() => {
       // 如果计时器触发，且在检测时间内没有新的输入，则执行中断
-      if (Date.now() - this.lastUserInputTime >= this.config.interruptionDetectionMs) {
+      if (Date.now() - this.lastUserInputTime >= this.config.interruption.detectionTimeMs) {
         this._interruptAIResponse();
       }
-    }, this.config.interruptionDetectionMs);
+    }, this.config.interruption.detectionTimeMs);
   }
 
   // 中断 AI 回答
@@ -182,8 +610,8 @@ class AIManager {
     if (!this.isProcessing || !this.hasNewUserInput) return;
     
     console.log("\n\n🔄 检测到新输入，中断当前 AI 回答...\n");
-    if (this.config.saveToFile) {
-      appendFileSync(this.config.qaOutputFile, "\n\n[中断：检测到新输入]\n\n");
+    if (this.config.output.saveToFile) {
+      appendFileSync(this.config.output.qaOutputFile, "\n\n[中断：检测到新输入]\n\n");
     }
 
     // 中断当前的 AI 响应
@@ -196,7 +624,7 @@ class AIManager {
 
   _resetSilenceTimer() {
     if (this.silenceTimer) clearTimeout(this.silenceTimer);
-    this.silenceTimer = setTimeout(() => this._onSilenceTimeout(), this.config.silenceTimeoutMs);
+    this.silenceTimer = setTimeout(() => this._onSilenceTimeout(), this.config.ai.silenceTimeoutMs);
   }
 
   async _onSilenceTimeout() {
@@ -241,25 +669,10 @@ class AIManager {
     }
   }
 
-  // 将部分片段通知 provider（非强制）
-  async _notifyProviderOfPartial(text) {
-    // For simplicity we call provider with a "log" endpoint if available.
-    // Implementations can be no-op for providers that don't support it.
-    if (this.provider === 'openai') {
-      // noop (we rely on final call)
-      return;
-    } else if (this.provider === 'claude') {
-      return;
-    } else if (this.provider === 'deepseek') {
-      // noop
-      return;
-    }
-  }
-
   // 触发请求 AI 获取答案（最终回答），并流式将答案输出到控制台 + 文件
   async getAnswerForQuestion(question) {
     const startTs = new Date().toISOString();
-    const systemPrompt = this.config.aiSystemPrompt;
+    const systemPrompt = this.config.ai.systemPrompt;
 
     // Build messages (conversation history + current question)
     const messages = [
@@ -275,19 +688,19 @@ class AIManager {
     messages.push({ role: 'user', content: question });
 
     // Save QA header in file
-    const qaHeader = `\n\n=== QA Session Started: ${startTs} (provider=${this.provider}) ===\nQ: ${question}\n`;
-    if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, qaHeader);
+    const qaHeader = `\n\n=== QA Session Started: ${startTs} (provider=${this.provider.getName()}) ===\nQ: ${question}\n`;
+    if (this.config.output.saveToFile) appendFileSync(this.config.output.qaOutputFile, qaHeader);
 
     // Dispatch to provider
     let partialAnswer = '';
     try {
       // 统一使用 streamCompletion 方法处理所有 AI provider，并传入中断控制器
-      partialAnswer = await this._streamCompletion(messages, this.currentController);
+      partialAnswer = await this.provider.streamCompletion(messages, this.currentController);
     } catch (error) {
       if (error.name === 'AbortError') {
         // 正常中断，记录中断信息
-        if (this.config.saveToFile) {
-          appendFileSync(this.config.qaOutputFile, `\n[回答被中断]\n`);
+        if (this.config.output.saveToFile) {
+          appendFileSync(this.config.output.qaOutputFile, `\n[回答被中断]\n`);
         }
         // 将中断的回答添加到会话历史
         this.conversationHistory.push({
@@ -299,9 +712,9 @@ class AIManager {
         return partialAnswer;
       } else {
         // 其他错误
-        console.error(`❌ ${this.provider.toUpperCase()} error:`, error.message);
-        if (this.config.saveToFile) {
-          appendFileSync(this.config.qaOutputFile, `${this.provider.toUpperCase()} error: ${error.message}\n`);
+        console.error(`❌ ${this.provider.getName().toUpperCase()} error:`, error.message);
+        if (this.config.output.saveToFile) {
+          appendFileSync(this.config.output.qaOutputFile, `${this.provider.getName().toUpperCase()} error: ${error.message}\n`);
         }
       }
     }
@@ -314,241 +727,10 @@ class AIManager {
       });
       
       const endTs = new Date().toISOString();
-      if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, `\n=== QA Session Ended: ${endTs} ===\n`);
+      if (this.config.output.saveToFile) appendFileSync(this.config.output.qaOutputFile, `\n=== QA Session Ended: ${endTs} ===\n`);
     }
     
     return partialAnswer;
-  }
-
-  // 统一的流式调用方法，根据 provider 类型调用不同的实现
-  async _streamCompletion(messages, controller) {
-    switch (this.provider) {
-      case 'openai':
-        return await this._streamOpenAI(messages, controller);
-      case 'claude':
-        return await this._streamClaude(messages, controller);
-      case 'deepseek':
-        return await this._streamDeepseekWithSDK(messages, controller);
-      default:
-        throw new Error(`Unknown AI provider: ${this.provider}`);
-    }
-  }
-
-  // 处理 Reader 流的通用方法，添加中断支持
-  async _processStream(reader, textDecoder, parseChunk, controller) {
-    let done = false;
-    let partialAnswer = '';
-    
-    try {
-      while (!done) {
-        // 检查是否被中断
-        if (controller.isInterrupted()) {
-          reader.cancel();
-          throw new DOMException('Stream processing aborted', 'AbortError');
-        }
-        
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        
-        if (value) {
-          const chunk = textDecoder.decode(value, { stream: true });
-          const tokens = parseChunk(chunk);
-          
-          for (const token of tokens) {
-            // 每处理一个 token 也检查是否被中断
-            if (controller.isInterrupted()) {
-              reader.cancel();
-              throw new DOMException('Stream processing aborted', 'AbortError');
-            }
-            
-            if (token) {
-              process.stdout.write(token);
-              partialAnswer += token;
-              if (this.config.saveToFile) appendFileSync(this.config.qaOutputFile, token);
-            }
-          }
-        }
-      }
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        throw error; // 重新抛出中断错误
-      }
-      console.error('Stream processing error:', error);
-    }
-    
-    if (this.config.logToConsole && !controller.isInterrupted()) console.log('\n');
-    return partialAnswer;
-  }
-
-  // OpenAI 流式实现 (使用 v1 completions API)，添加中断支持
-  async _streamOpenAI(messages, controller) {
-    const apiKey = this.config.openaiApiKey;
-    const url = 'https://api.openai.com/v1/chat/completions';
-
-    // 请求 stream=true 并解析 SSE 流
-    const body = {
-      model: this.config.openaiModel,
-      messages: messages,
-      temperature: 0.2,
-      stream: true
-    };
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`HTTP error ${res.status}: ${text}`);
-    }
-
-    // 使用通用流处理方法
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    
-    return await this._processStream(reader, decoder, (chunk) => {
-      // OpenAI 流解析
-      const tokens = [];
-      const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0);
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const payload = line.replace(/^data: /, '');
-          if (payload === '[DONE]') continue;
-          
-          try {
-            const parsed = JSON.parse(payload);
-            const token = parsed.choices?.[0]?.delta?.content || '';
-            if (token) tokens.push(token);
-          } catch (e) {
-            // 忽略 JSON 解析错误
-          }
-        }
-      }
-      
-      return tokens;
-    }, controller);
-  }
-
-  // Claude 流式实现，添加中断支持
-  async _streamClaude(messages, controller) {
-    const apiKey = this.config.claudeApiKey;
-    
-    // 构建 API 请求
-    // 注意：Claude API 从旧版的 v1/complete 已更新到 v1/messages
-    const url = 'https://api.anthropic.com/v1/messages';
-    
-    // 转换消息格式为 Claude 格式
-    const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
-    const userMessages = messages.filter(m => m.role !== 'system');
-    
-    const body = {
-      model: this.config.claudeModel,
-      system: systemPrompt,
-      messages: userMessages.map(m => ({
-        role: m.role,
-        content: m.content
-      })),
-      max_tokens: 800,
-      temperature: 0.2,
-      stream: true
-    };
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`HTTP error ${res.status}: ${text}`);
-    }
-
-    // 使用通用流处理方法
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    
-    return await this._processStream(reader, decoder, (chunk) => {
-      // Claude 流解析
-      const tokens = [];
-      const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0);
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const payload = line.replace(/^data: /, '');
-          if (payload === '[DONE]') continue;
-          
-          try {
-            const parsed = JSON.parse(payload);
-            // 新版 Claude API 在 delta.text 中返回 token
-            const token = parsed.delta?.text || '';
-            if (token) tokens.push(token);
-          } catch (e) {
-            // 非 JSON 行，可能是普通文本（旧版API）
-            if (line !== 'data: [DONE]') tokens.push(line);
-          }
-        }
-      }
-      
-      return tokens;
-    }, controller);
-  }
-
-  // 使用 OpenAI SDK 调用 Deepseek API（流式），添加中断支持
-  async _streamDeepseekWithSDK(messages, controller) {
-    try {
-      // 使用 OpenAI SDK 创建流式对话完成
-      const stream = await this.openai.chat.completions.create({
-        model: this.config.deepseekModel,
-        messages: messages.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
-        stream: true,
-        temperature: 0.2
-      }, { signal: controller.signal });
-
-      let fullText = '';
-
-      // 处理流式响应
-      for await (const chunk of stream) {
-        // 检查是否被中断
-        if (controller.isInterrupted()) {
-          throw new DOMException('Stream processing aborted', 'AbortError');
-        }
-        
-        const content = chunk.choices[0]?.delta?.content || '';
-        if (content) {
-          process.stdout.write(content);
-          fullText += content;
-          
-          // 保存到文件
-          if (this.config.saveToFile) {
-            appendFileSync(this.config.qaOutputFile, content);
-          }
-        }
-      }
-
-      if (this.config.logToConsole && !controller.isInterrupted()) console.log('\n'); // 流结束后添加换行
-      return fullText;
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        throw error; // 重新抛出中断错误
-      }
-      throw new Error(`Deepseek API error: ${error.message}`);
-    }
   }
 }
 
@@ -564,19 +746,19 @@ class AudioTranscriber {
   }
 
   initDeepgram() {
-    this.deepgramClient = createClient(this.config.deepgramApiKey);
+    this.deepgramClient = createClient(this.config.deepgram.apiKey);
     console.log('✅ Deepgram client initialized');
   }
 
   createDeepgramConnection() {
     this.deepgramConnection = this.deepgramClient.listen.live({
-      language: this.config.language,
-      model: this.config.model,
-      smart_format: this.config.smartFormat,
-      punctuate: this.config.punctuate,
-      encoding: 'linear16',
-      sample_rate: 16000,
-      channels: 1
+      language: this.config.deepgram.language,
+      model: this.config.deepgram.model,
+      smart_format: this.config.deepgram.smartFormat,
+      punctuate: this.config.deepgram.punctuate,
+      encoding: this.config.audio.encoding,
+      sample_rate: this.config.audio.sampleRate,
+      channels: this.config.audio.channels
     });
 
     this.deepgramConnection.on(LiveTranscriptionEvents.Open, () => {
@@ -591,12 +773,12 @@ class AudioTranscriber {
         const output = `[${timestamp}] ${transcript}\n`;
 
         // 输出到控制台
-        if (this.config.logToConsole) {
+        if (this.config.output.logToConsole) {
           console.log(`${transcript}`);
         }
 
         // 保存到文件
-        if (this.config.saveToFile && this.fileStream) {
+        if (this.config.output.saveToFile && this.fileStream) {
           this.fileStream.write(output);
         }
 
@@ -627,7 +809,7 @@ class AudioTranscriber {
   startFFmpegCapture() {
     const ffmpegArgs = [
       '-f', 'avfoundation',
-      '-i', `:${this.config.audioDevice}`,
+      '-i', `:${this.config.audio.device}`,
       '-acodec', 'pcm_s16le',
       '-ar', '16000',
       '-ac', '1',
@@ -636,7 +818,7 @@ class AudioTranscriber {
     ];
 
     console.log('🚀 Starting FFmpeg audio capture...');
-    console.log(`📡 Audio device: ${this.config.audioDevice}`);
+    console.log(`📡 Audio device: ${this.config.audio.device}`);
 
     this.ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
 
@@ -662,11 +844,11 @@ class AudioTranscriber {
   }
 
   createFileStream() {
-    if (this.config.saveToFile) {
-      this.fileStream = createWriteStream(this.config.outputFile, { flags: 'a' });
+    if (this.config.output.saveToFile) {
+      this.fileStream = createWriteStream(this.config.output.transcriptFile, { flags: 'a' });
       const timestamp = new Date().toISOString();
       this.fileStream.write(`\n\n=== Transcription Session Started: ${timestamp} ===\n\n`);
-      console.log(`✅ Saving transcripts to: ${this.config.outputFile}`);
+      console.log(`✅ Saving transcripts to: ${this.config.output.transcriptFile}`);
     }
   }
 
@@ -682,6 +864,12 @@ class AudioTranscriber {
     try {
       this.isRunning = true;
 
+      // 创建输出目录
+      if (this.config.output.saveToFile) {
+        mkdirSync(dirname(this.config.output.transcriptFile), { recursive: true });
+        mkdirSync(dirname(this.config.output.qaOutputFile), { recursive: true });
+      }
+
       // 初始化组件
       this.initDeepgram();
       this.createDeepgramConnection();
@@ -690,8 +878,8 @@ class AudioTranscriber {
 
       console.log('='.repeat(50));
       console.log('✅ Transcription service started successfully!');
-      console.log(`🤖 AI Provider: ${this.config.aiProvider.toUpperCase()}`);
-      if (this.config.allowInterruption) {
+      console.log(`🤖 AI Provider: ${this.config.ai.provider.toUpperCase()}`);
+      if (this.config.interruption.enabled) {
         console.log(`⚡ 中断功能已启用: 在 AI 回答时说话可以打断 AI`);
       }
       console.log('Press Ctrl+C to stop\n');
@@ -734,6 +922,9 @@ class AudioTranscriber {
     console.log('👋 Transcription service stopped\n');
   }
 }
+
+// 创建配置
+const CONFIG = loadConfig();
 
 // 创建转录器实例
 const transcriber = new AudioTranscriber(CONFIG);
