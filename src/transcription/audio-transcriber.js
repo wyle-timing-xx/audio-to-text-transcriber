@@ -14,6 +14,8 @@ class AudioTranscriber {
     this.fileStream = null;
     this.isRunning = false;
     this.aiManager = new AIManager(config);
+    this.lastTranscriptTime = Date.now(); // 跟踪最后一次收到转录的时间
+    this.audioDetected = false; // 音频检测状态
   }
 
   initDeepgram() {
@@ -29,7 +31,9 @@ class AudioTranscriber {
       punctuate: this.config.deepgram.punctuate,
       encoding: this.config.audio.encoding,
       sample_rate: this.config.audio.sampleRate,
-      channels: this.config.audio.channels
+      channels: this.config.audio.channels,
+      interim_results: true, // 启用中间结果以更快地检测音频
+      vad_turnoff: 500 // 语音活动检测超时（毫秒）
     });
 
     this.deepgramConnection.on(LiveTranscriptionEvents.Open, () => {
@@ -38,6 +42,16 @@ class AudioTranscriber {
     });
 
     this.deepgramConnection.on(LiveTranscriptionEvents.Transcript, async (data) => {
+      // 音频活动状态监控
+      this.lastTranscriptTime = Date.now();
+      if (!this.audioDetected) {
+        this.audioDetected = true;
+        // 如果是从静默状态切换到有音频输入，并且AI正在回答，立即提示检测到语音
+        if (this.aiManager.isProcessing && this.config.interruption.enabled) {
+          console.log('🔊 检测到语音输入，准备中断AI回答...');
+        }
+      }
+
       const transcript = data.channel.alternatives[0].transcript;
       if (transcript && transcript.trim().length > 0) {
         const timestamp = new Date().toISOString();
@@ -45,7 +59,12 @@ class AudioTranscriber {
 
         // 输出到控制台
         if (this.config.output.logToConsole) {
-          console.log(`${transcript}`);
+          // 如果AI正在回答且启用了中断，使用特殊标记使中断更明显
+          if (this.aiManager.isProcessing && this.config.interruption.enabled) {
+            console.log(`🔴 ${transcript} 🔴`);
+          } else {
+            console.log(`${transcript}`);
+          }
         }
 
         // 保存到文件
@@ -63,7 +82,10 @@ class AudioTranscriber {
     });
 
     this.deepgramConnection.on(LiveTranscriptionEvents.Metadata, (data) => {
-      console.log('📊 Metadata:', data);
+      // 可以监听静默检测
+      if (data?.speech?.final && !data?.speech?.speech_final) {
+        this.audioDetected = false;
+      }
     });
 
     this.deepgramConnection.on(LiveTranscriptionEvents.Error, (error) => {
@@ -116,6 +138,7 @@ class AudioTranscriber {
 
   createFileStream() {
     if (this.config.output.saveToFile) {
+      mkdirSync(dirname(this.config.output.transcriptFile), { recursive: true });
       this.fileStream = createWriteStream(this.config.output.transcriptFile, { flags: 'a' });
       const timestamp = new Date().toISOString();
       this.fileStream.write(`\n\n=== Transcription Session Started: ${timestamp} ===\n\n`);
@@ -147,11 +170,14 @@ class AudioTranscriber {
       this.createFileStream();
       this.startFFmpegCapture();
 
+      // 启动音频活动监控
+      this.startAudioMonitoring();
+
       console.log('='.repeat(50));
       console.log('✅ Transcription service started successfully!');
       console.log(`🤖 AI Provider: ${this.config.ai.provider.toUpperCase()}`);
       if (this.config.interruption.enabled) {
-        console.log(`⚡ 中断功能已启用: 在 AI 回答时说话可以打断 AI`);
+        console.log(`⚡ 增强中断功能已启用: 在AI回答时一检测到声音就会立即中断`);
       }
       console.log('Press Ctrl+C to stop\n');
 
@@ -159,6 +185,18 @@ class AudioTranscriber {
       console.error('❌ Failed to start transcription service:', error);
       this.stop();
     }
+  }
+
+  // 启动音频活动监控
+  startAudioMonitoring() {
+    // 定期检查音频活动状态，超过一定时间没有接收到音频转录，则认为没有人说话
+    setInterval(() => {
+      const silenceTime = Date.now() - this.lastTranscriptTime;
+      // 如果超过500ms没有收到音频输入，将状态重置为无音频
+      if (silenceTime > 500 && this.audioDetected) {
+        this.audioDetected = false;
+      }
+    }, 200); // 每200ms检查一次音频活动状态
   }
 
   stop() {
