@@ -8,13 +8,9 @@ class BaseProvider {
   /**
    * 创建 AI 提供商实例
    * @param {Object} config AI 配置
-   * @param {Object} logger 日志记录器
-   * @param {Object} fileStorage 文件存储工具
    */
-  constructor(config, logger, fileStorage) {
+  constructor(config) {
     this.config = config;
-    this.logger = logger;
-    this.fileStorage = fileStorage;
     
     if (new.target === BaseProvider) {
       throw new TypeError("Cannot instantiate BaseProvider directly");
