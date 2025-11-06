@@ -22,7 +22,7 @@ class ClaudeProvider extends BaseProvider {
     return Promise.resolve();
   }
 
-  async streamCompletion(messages, controller) {
+  async streamCompletion(messages, controller, tokenCallback = null) {
     const apiKey = this.config.ai.claudeApiKey;
     
     // 构建 API 请求
@@ -68,12 +68,10 @@ class ClaudeProvider extends BaseProvider {
     // 输出处理函数
     const outputHandler = (token) => {
       process.stdout.write(token);
-      if (this.config.output.saveToFile) {
-        appendFileSync(this.config.output.qaOutputFile, token);
-      }
+      // 注意：文件写入现在由AIManager处理
     };
     
-    return await processStream(reader, decoder, parseClaudeStream, controller, outputHandler);
+    return await processStream(reader, decoder, parseClaudeStream, controller, outputHandler, tokenCallback);
   }
 }
 
