@@ -25,7 +25,7 @@ class DeepseekProvider extends BaseProvider {
     return Promise.resolve();
   }
 
-  async streamCompletion(messages, controller) {
+  async streamCompletion(messages, controller, tokenCallback = null) {
     try {
       // 使用 OpenAI SDK 创建流式对话完成
       const stream = await this.openai.chat.completions.create({
@@ -52,9 +52,9 @@ class DeepseekProvider extends BaseProvider {
           process.stdout.write(content);
           fullText += content;
           
-          // 保存到文件
-          if (this.config.output.saveToFile) {
-            appendFileSync(this.config.output.qaOutputFile, content);
+          // 如果提供了token回调函数，调用它
+          if (tokenCallback && typeof tokenCallback === 'function') {
+            await tokenCallback(content);
           }
         }
       }

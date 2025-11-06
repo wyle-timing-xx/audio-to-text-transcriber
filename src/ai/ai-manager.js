@@ -2,6 +2,7 @@
 import { appendFileSync } from 'fs';
 import InterruptibleController from './interruption.js';
 import { createProvider } from './providers/index.js';
+import TTSManager from '../tts/tts-manager.js';
 
 class AIManager {
   constructor(config) {
@@ -15,6 +16,17 @@ class AIManager {
     this.interruptionTimer = null; // 中断检测计时器
     this.lastUserInputTime = Date.now(); // 上次用户输入时间
     this.hasNewUserInput = false; // 是否有新的用户输入
+    
+    // 初始化TTS管理器
+    this.ttsManager = new TTSManager(config);
+  }
+
+  // 初始化AI管理器
+  async initialize() {
+    // 初始化TTS管理器
+    if (this.config.tts.enabled) {
+      await this.ttsManager.initialize();
+    }
   }
 
   // 将 fragment 添加到 buffer，并（可选）做 partial send（记录/上下文）
@@ -35,6 +47,13 @@ class AIManager {
     if (this.config.interruption.enabled && this.isProcessing) {
       // 立即中断当前回答，无需等待
       this._interruptAIResponse();
+    }
+
+    // 如果启用了TTS，且配置为检测用户输入时中断TTS，则停止当前TTS
+    if (this.config.tts.enabled && 
+        this.config.tts.interruptTtsOnUserInput && 
+        this.ttsManager.isPlaying) {
+      this.ttsManager.stopAll();
     }
 
     if (this.config.ai.partialSend) {
@@ -62,6 +81,11 @@ class AIManager {
 
     // 中断当前的 AI 响应
     this.currentController.abort();
+    
+    // 如果启用了TTS，停止当前TTS播放
+    if (this.config.tts.enabled) {
+      this.ttsManager.stopAll();
+    }
     
     // 此时不重置 isProcessing，因为 _onSilenceTimeout 中会等待静默后再处理新的问题
   }
@@ -137,9 +161,34 @@ class AIManager {
 
     // Dispatch to provider
     let partialAnswer = '';
+    let accumulatedText = ''; // 用于累积响应文本以传递给TTS
+
     try {
+      // 为了支持流式TTS，我们需要修改streamCompletion调用方式
+      // 使用自定义回调来处理每个token
+      const handleToken = async (token) => {
+        // 累积文本用于最终保存
+        partialAnswer += token;
+        
+        // 如果启用了TTS，将token传递给TTS管理器
+        if (this.config.tts.enabled && this.config.tts.autoPlayAnswers) {
+          accumulatedText += token;
+          await this.ttsManager.handleStreamContent(token, false);
+        }
+        
+        // 将token写入文件
+        if (this.config.output.saveToFile) {
+          appendFileSync(this.config.output.qaOutputFile, token);
+        }
+      };
+      
       // 统一使用 streamCompletion 方法处理所有 AI provider，并传入中断控制器
-      partialAnswer = await this.provider.streamCompletion(messages, this.currentController);
+      await this.provider.streamCompletion(messages, this.currentController, handleToken);
+      
+      // 处理最后可能剩余的TTS文本
+      if (this.config.tts.enabled && this.config.tts.autoPlayAnswers) {
+        await this.ttsManager.handleStreamContent('', true); // 结束标记
+      }
     } catch (error) {
       if (error.name === 'AbortError') {
         // 正常中断，记录中断信息

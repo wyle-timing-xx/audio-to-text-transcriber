@@ -90,6 +90,34 @@ export function loadConfig() {
       
       // 中断冷却时间
       cooldownMs: parseInt(process.env.INTERRUPTION_COOLDOWN_MS || defaultConfig.interruption.cooldownMs, 10)
+    },
+    
+    // 语音合成配置
+    tts: {
+      enabled: process.env.TTS_ENABLED !== 'false' && defaultConfig.tts.enabled,
+      provider: (process.env.TTS_PROVIDER || defaultConfig.tts.provider).toLowerCase(),
+      
+      // ElevenLabs配置
+      elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
+      elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID || defaultConfig.tts.elevenLabsVoiceId,
+      elevenLabsModelId: process.env.ELEVENLABS_MODEL_ID || defaultConfig.tts.elevenLabsModelId,
+      elevenLabsStability: parseFloat(process.env.ELEVENLABS_STABILITY || defaultConfig.tts.elevenLabsStability),
+      elevenLabsSimilarityBoost: parseFloat(process.env.ELEVENLABS_SIMILARITY_BOOST || defaultConfig.tts.elevenLabsSimilarityBoost),
+      elevenLabsStyle: parseFloat(process.env.ELEVENLABS_STYLE || defaultConfig.tts.elevenLabsStyle),
+      elevenLabsSpeakerBoost: process.env.ELEVENLABS_SPEAKER_BOOST !== 'false' && defaultConfig.tts.elevenLabsSpeakerBoost,
+      
+      // 提示词配置
+      elevenLabsUsePrompt: process.env.ELEVENLABS_USE_PROMPT !== 'false' && defaultConfig.tts.elevenLabsUsePrompt,
+      elevenLabsPromptText: process.env.ELEVENLABS_PROMPT_TEXT || defaultConfig.tts.elevenLabsPromptText,
+      
+      // 音频输出设备
+      outputDevice: process.env.TTS_OUTPUT_DEVICE || defaultConfig.tts.outputDevice,
+      
+      // 行为配置
+      autoPlayAnswers: process.env.TTS_AUTO_PLAY_ANSWERS !== 'false' && defaultConfig.tts.autoPlayAnswers,
+      maxTextLength: parseInt(process.env.TTS_MAX_TEXT_LENGTH || defaultConfig.tts.maxTextLength, 10),
+      splitDelimiters: defaultConfig.tts.splitDelimiters,
+      interruptTtsOnUserInput: process.env.TTS_INTERRUPT_ON_USER_INPUT !== 'false' && defaultConfig.tts.interruptTtsOnUserInput
     }
   };
 
@@ -131,6 +159,29 @@ function validateConfig(config) {
     // 检测时间不能小于100ms
     if (config.interruption.detectionTimeMs < 100) {
       config.interruption.detectionTimeMs = 100;
+    }
+  }
+  
+  // 验证TTS配置
+  if (config.tts.enabled) {
+    // 验证ElevenLabs API Key
+    if (config.tts.provider === 'elevenlabs' && !config.tts.elevenLabsApiKey) {
+      throw new Error('❌ Error: ELEVENLABS_API_KEY required for ElevenLabs TTS provider');
+    }
+    
+    // 验证稳定性和相似度参数范围
+    if (config.tts.elevenLabsStability < 0 || config.tts.elevenLabsStability > 1) {
+      console.warn('⚠️ Warning: ELEVENLABS_STABILITY should be between 0 and 1, using default value');
+      config.tts.elevenLabsStability = defaultConfig.tts.elevenLabsStability;
+    }
+    
+    if (config.tts.elevenLabsSimilarityBoost < 0 || config.tts.elevenLabsSimilarityBoost > 1) {
+      console.warn('⚠️ Warning: ELEVENLABS_SIMILARITY_BOOST should be between 0 and 1, using default value');
+      config.tts.elevenLabsSimilarityBoost = defaultConfig.tts.elevenLabsSimilarityBoost;
+    }
+    
+    if (config.tts.maxTextLength < 10) {
+      config.tts.maxTextLength = 10;
     }
   }
 }
