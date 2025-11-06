@@ -187,6 +187,9 @@ class AudioTranscriber {
         mkdirSync(dirname(this.config.output.qaOutputFile), { recursive: true });
       }
 
+      // 初始化AI管理器（包括TTS初始化）
+      await this.aiManager.initialize();
+
       // 初始化组件
       this.initDeepgram();
       this.createDeepgramConnection();
@@ -202,12 +205,20 @@ class AudioTranscriber {
       console.log('✅ Transcription service started successfully!');
       console.log(`🤖 AI Provider: ${this.config.ai.provider.toUpperCase()}`);
       
+      // TTS功能说明
+      if (this.config.tts.enabled) {
+        console.log(`🔊 TTS Provider: ${this.config.tts.provider.toUpperCase()}`);
+        if (this.config.tts.interruptTtsOnUserInput) {
+          console.log(`⚡ TTS中断功能已启用: 在TTS播放时说话会立即停止当前播放`);
+        }
+      }
+      
       // 中断功能说明
       if (this.config.interruption.enabled) {
         if (this.config.interruption.immediateInterrupt) {
           console.log(`⚡ 增强中断功能已启用: 在AI回答时一检测到声音就会立即中断`);
         } else {
-          console.log(`⚡ 中断功能已启用: 在 AI 回答时说话可以打断 AI`);
+          console.log(`⚡ 中断功能已启用: 在AI回答时说话可以打断AI`);
         }
       }
       
@@ -236,6 +247,12 @@ class AudioTranscriber {
 
     console.log('\n⏹️  Stopping transcription service...');
     this.isRunning = false;
+
+    // 停止TTS
+    if (this.config.tts.enabled && this.aiManager.ttsManager) {
+      this.aiManager.ttsManager.stopAll();
+      console.log('✅ TTS stopped');
+    }
 
     if (this.ffmpegProcess) {
       this.ffmpegProcess.kill('SIGTERM');
