@@ -46,9 +46,10 @@ class BaseProvider {
    * 流式获取问题的回答
    * @param {Object[]} messages 消息数组
    * @param {Object} controller 中断控制器
+   * @param {Function} tokenCallback 处理每个输出token的回调函数，可用于TTS处理
    * @returns {Promise<string>} 完整回答
    */
-  async streamCompletion(messages, controller) {
+  async streamCompletion(messages, controller, tokenCallback) {
     throw new Error("Method 'streamCompletion()' must be implemented");
   }
 }
