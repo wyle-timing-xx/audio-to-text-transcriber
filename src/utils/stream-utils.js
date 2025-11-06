@@ -8,10 +8,11 @@
  * @param {Function} parseChunk 解析块函数
  * @param {Object} controller 中断控制器
  * @param {Function} outputHandler 输出处理函数
+ * @param {Function} tokenCallback 可选的token回调函数，用于TTS等处理
  * @returns {Promise<string>} 处理完成的文本
  * @throws {AbortError} 如果流处理被中断
  */
-export async function processStream(reader, textDecoder, parseChunk, controller, outputHandler) {
+export async function processStream(reader, textDecoder, parseChunk, controller, outputHandler, tokenCallback = null) {
   let done = false;
   let fullText = '';
   
@@ -40,6 +41,12 @@ export async function processStream(reader, textDecoder, parseChunk, controller,
           if (token) {
             // 使用输出处理器处理 token
             outputHandler(token);
+            
+            // 如果提供了token回调函数，调用它
+            if (tokenCallback && typeof tokenCallback === 'function') {
+              await tokenCallback(token);
+            }
+            
             fullText += token;
           }
         }
