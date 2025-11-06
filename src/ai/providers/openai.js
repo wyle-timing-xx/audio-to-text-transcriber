@@ -26,7 +26,7 @@ class OpenAIProvider extends BaseProvider {
     return Promise.resolve();
   }
 
-  async streamCompletion(messages, controller) {
+  async streamCompletion(messages, controller, tokenCallback = null) {
     const apiKey = this.config.ai.openaiApiKey;
     const url = 'https://api.openai.com/v1/chat/completions';
 
@@ -60,12 +60,10 @@ class OpenAIProvider extends BaseProvider {
     // 输出处理函数
     const outputHandler = (token) => {
       process.stdout.write(token);
-      if (this.config.output.saveToFile) {
-        appendFileSync(this.config.output.qaOutputFile, token);
-      }
+      // 注意：文件写入现在由AIManager处理
     };
     
-    return await processStream(reader, decoder, parseOpenAIStream, controller, outputHandler);
+    return await processStream(reader, decoder, parseOpenAIStream, controller, outputHandler, tokenCallback);
   }
 }
 
