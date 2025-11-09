@@ -1,8 +1,10 @@
-// AI 管理器模块
-import { appendFileSync } from 'fs';
+// AI 管理器模块 - 添加了语言检测和Prompt选择功能
+import { appendFileSync, readFileSync } from 'fs';
+import { resolve } from 'path';
 import InterruptibleController from './interruption.js';
 import { createProvider } from './providers/index.js';
 import TTSManager from '../tts/tts-manager.js';
+import LanguageDetector from '../utils/language-detector.js';
 
 class AIManager {
   constructor(config) {
@@ -19,6 +21,23 @@ class AIManager {
     
     // 初始化TTS管理器
     this.ttsManager = new TTSManager(config);
+
+    // 加载英文和中文Prompt
+    try {
+      this.enPrompt = readFileSync(resolve(process.cwd(), 'Prompt_en.md'), 'utf8');
+      console.log('✅ 英文Prompt加载成功');
+    } catch (error) {
+      console.error('❌ 英文Prompt加载失败:', error.message);
+      this.enPrompt = this.config.ai.systemPrompt; // 回退到默认系统Prompt
+    }
+
+    try {
+      this.zhPrompt = readFileSync(resolve(process.cwd(), 'Prompt_zh.md'), 'utf8');
+      console.log('✅ 中文Prompt加载成功');
+    } catch (error) {
+      console.error('❌ 中文Prompt加载失败:', error.message);
+      this.zhPrompt = this.config.ai.systemPrompt; // 回退到默认系统Prompt
+    }
   }
 
   // 初始化AI管理器
@@ -140,7 +159,13 @@ class AIManager {
   // 触发请求 AI 获取答案（最终回答），并流式将答案输出到控制台 + 文件
   async getAnswerForQuestion(question) {
     const startTs = new Date().toISOString();
-    const systemPrompt = this.config.ai.systemPrompt;
+    
+    // 检测问题的语言
+    const detectedLanguage = LanguageDetector.detectLanguage(question);
+    console.log(`🔍 检测到语言: ${detectedLanguage === 'zh' ? '中文' : '英文'}`);
+    
+    // 根据检测到的语言选择相应的Prompt
+    const systemPrompt = detectedLanguage === 'zh' ? this.zhPrompt : this.enPrompt;
 
     // Build messages (conversation history + current question)
     const messages = [
@@ -156,7 +181,7 @@ class AIManager {
     messages.push({ role: 'user', content: question });
 
     // Save QA header in file
-    const qaHeader = `\n\n=== QA Session Started: ${startTs} (provider=${this.provider.getName()}) ===\nQ: ${question}\n`;
+    const qaHeader = `\n\n=== QA Session Started: ${startTs} (provider=${this.provider.getName()}, language=${detectedLanguage}) ===\nQ: ${question}\n`;
     if (this.config.output.saveToFile) appendFileSync(this.config.output.qaOutputFile, qaHeader);
 
     // Dispatch to provider
