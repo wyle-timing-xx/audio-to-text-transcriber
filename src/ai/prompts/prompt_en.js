@@ -1,4 +1,4 @@
-// 英文系统提示词 - 从根目录直接读取
+
 import fs from 'fs';
 import path from 'path';
 
