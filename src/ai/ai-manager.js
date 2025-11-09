@@ -3,6 +3,7 @@ import { appendFileSync } from 'fs';
 import InterruptibleController from './interruption.js';
 import { createProvider } from './providers/index.js';
 import TTSManager from '../tts/tts-manager.js';
+import { getSystemPrompt } from './prompts/index.js';
 
 class AIManager {
   constructor(config) {
@@ -137,10 +138,18 @@ class AIManager {
     }
   }
 
+  // 根据配置的语言获取系统提示词
+  getSystemPromptByLanguage() {
+    // 使用 getSystemPrompt 函数获取当前语言的系统提示词
+    // 如果用户设置了自定义提示词，则优先使用用户设置
+    return this.config.ai.systemPrompt || getSystemPrompt(this.config.deepgram.language);
+  }
+
   // 触发请求 AI 获取答案（最终回答），并流式将答案输出到控制台 + 文件
   async getAnswerForQuestion(question) {
     const startTs = new Date().toISOString();
-    const systemPrompt = this.config.ai.systemPrompt;
+    // 获取基于当前语言的系统提示词
+    const systemPrompt = this.getSystemPromptByLanguage();
 
     // Build messages (conversation history + current question)
     const messages = [
