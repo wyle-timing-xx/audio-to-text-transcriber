@@ -1,7 +1,7 @@
 {
   "name": "audio-to-text-transcriber",
-  "version": "1.1.0",
-  "description": "Real-time audio capture and transcription using Node.js + FFmpeg + Deepgram + BlackHole with AI conversation capabilities and interruption feature",
+  "version": "1.2.0",
+  "description": "Real-time audio capture and transcription using Node.js + FFmpeg + Deepgram + BlackHole with AI conversation capabilities and keyboard interruption (Ctrl+T)",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
@@ -25,6 +25,7 @@
     "claude",
     "deepseek",
     "interruption",
+    "keyboard-shortcut",
     "voice-assistant"
   ],
   "author": "",
