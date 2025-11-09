@@ -65,7 +65,6 @@ export function loadConfig() {
       },
       
       // 系统提示词
-      systemPrompt: process.env.AI_SYSTEM_PROMPT || defaultConfig.ai.systemPrompt,
       
       // 静默检测时间
       silenceTimeoutMs: parseInt(process.env.SILENCE_TIMEOUT_MS || defaultConfig.ai.silenceTimeoutMs, 10),

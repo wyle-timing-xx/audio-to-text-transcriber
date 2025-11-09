@@ -141,8 +141,7 @@ class AIManager {
   // 根据配置的语言获取系统提示词
   getSystemPromptByLanguage() {
     // 使用 getSystemPrompt 函数获取当前语言的系统提示词
-    // 如果用户设置了自定义提示词，则优先使用用户设置
-    return this.config.ai.systemPrompt || getSystemPrompt(this.config.deepgram.language);
+    return getSystemPrompt(this.config.deepgram.language);
   }
 
   // 触发请求 AI 获取答案（最终回答），并流式将答案输出到控制台 + 文件

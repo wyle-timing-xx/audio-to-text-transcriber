@@ -51,8 +51,6 @@ export default {
       deepseek: 'deepseek-chat'
     },
     
-    // 系统提示词 - 现在默认为null，将根据语言从prompt文件中加载
-    systemPrompt: null,
     
     // 静默检测时间（毫秒）
     silenceTimeoutMs: 1500,

@@ -155,7 +155,6 @@ npm start
 
 - **文件读取**：从根目录的 `Prompt_zh.md` 和 `Prompt_en.md` 文件读取提示词
 - **自动切换**：根据 `LANGUAGE` 环境变量自动选择对应语言的提示词
-- **优先级处理**：用户设置的自定义提示词 (`AI_SYSTEM_PROMPT`) 优先级更高
 - **灵活编辑**：用户可以直接编辑 Markdown 文件来自定义提示词，无需修改代码
 - **自动初始化**：首次运行时会自动创建默认提示词文件
 
@@ -181,8 +180,6 @@ DEEPSEEK_MODEL=deepseek-chat
 # 静默检测时间（毫秒）- 判断用户是否已提问完毕
 SILENCE_TIMEOUT_MS=1500
 
-# AI 系统提示词（可选，默认会根据 LANGUAGE 选择相应的提示词）
-AI_SYSTEM_PROMPT="你是智能问答助手，请简洁、准确地回答用户问题。"
 
 # 启用增量上报（实时将部分转录发送给 AI）
 PARTIAL_SEND=true
@@ -253,7 +250,6 @@ CLAUDE_MODEL=claude-3-opus-20240229
 DEEPSEEK_MODEL=deepseek-chat
 
 # AI 行为配置
-AI_SYSTEM_PROMPT="你是智能问答助手，请简洁、准确地回答用户问题。如果用户有后续问题，请在结尾提示用户可以继续追问。请注意：用户可能会随时通过说话来中断你的回答，这时候请立即停止并开始处理新的输入。"
 SILENCE_TIMEOUT_MS=1500
 PARTIAL_SEND=true
 
@@ -364,7 +360,6 @@ audio-to-text-transcriber/
 
 1. **读取配置**：从 `.env` 文件读取 `LANGUAGE` 设置（默认为 'en'）
 2. **加载提示词**：`prompt_zh.js` 和 `prompt_en.js` 直接从根目录读取对应的 Markdown 文件
-3. **优先级处理**：如果用户设置了 `AI_SYSTEM_PROMPT`，优先使用自定义提示词
 4. **应用提示词**：AI 使用选定的提示词与用户交互，提供更自然的对话体验
 
 ### 中断机制详解
