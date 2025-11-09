@@ -1,8 +1,15 @@
-const fs = require('fs');
-const path = require('path');
+// ESM 格式的提示词设置脚本
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// 获取当前文件的目录
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
 
 // 确保 transcription_prompts 目录存在
-const transcriptionPromptsDir = path.join(process.cwd(), 'transcription_prompts');
+const transcriptionPromptsDir = path.join(projectRoot, 'transcription_prompts');
 if (!fs.existsSync(transcriptionPromptsDir)) {
   console.log('Creating transcription_prompts directory...');
   fs.mkdirSync(transcriptionPromptsDir, { recursive: true });
