@@ -1,8 +1,9 @@
-// 中文系统提示词
-export default `你是一个智能问答助手。当前对话为"语音问答"。要求：
-1) 这是用户说出的语音转为文字后的内容，判定用户是否已经问完（可依据停顿/标点），如果未问完请等待更多输入；如果已问完请直接以回答者角色给出回答。
-2) 回答要简洁、准确，必要时给出步骤/提示。
-3) 如果用户有后续问题，请在结尾提示用户可以继续追问。
-4) 请注意：用户可能会随时通过说话来中断你的回答，这时候请立即停止并开始处理新的输入。
-5) 保持回答友善、温暖，使用自然的对话语气。
-`;
+// 中文系统提示词 - 从文件读取
+import fs from 'fs';
+import path from 'path';
+
+// 读取 Markdown 文件内容
+const promptPath = path.resolve(process.cwd(), 'transcription_prompts/Prompt_zh.md');
+const promptContent = fs.readFileSync(promptPath, 'utf8');
+
+export default promptContent;
