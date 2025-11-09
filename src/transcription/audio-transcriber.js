@@ -16,7 +16,6 @@ class AudioTranscriber {
     this.aiManager = new AIManager(config);
     this.lastTranscriptTime = Date.now(); // 跟踪最后一次收到转录的时间
     this.audioDetected = false; // 音频检测状态
-    this.lastInterruptTime = 0; // 最后一次中断的时间，用于冷却期
   }
 
   initDeepgram() {
@@ -49,24 +48,7 @@ class AudioTranscriber {
       // 检测到新音频输入
       if (!this.audioDetected) {
         this.audioDetected = true;
-        
-        // 如果启用了即时中断，AI正在回答，且不在冷却期内，立即中断
-        if (this.config.interruption.enabled && 
-            this.config.interruption.immediateInterrupt &&
-            this.aiManager.isProcessing && 
-            Date.now() - this.lastInterruptTime > this.config.interruption.cooldownMs) {
-          
-          // 中断提示
-          if (this.config.interruption.visualFeedback.enabled) {
-            console.log('🔊 检测到语音输入，立即中断AI回答...');
-          }
-          
-          // 记录中断时间
-          this.lastInterruptTime = Date.now();
-          
-          // 中断AI回答
-          await this.aiManager._interruptAIResponse();
-        }
+        // 注意：移除了基于音频的即时中断功能
       }
 
       const transcript = data.channel.alternatives[0].transcript;
@@ -76,17 +58,7 @@ class AudioTranscriber {
 
         // 输出到控制台
         if (this.config.output.logToConsole) {
-          // 根据配置决定是否使用特殊标记突出显示中断
-          if (this.aiManager.isProcessing && 
-              this.config.interruption.enabled && 
-              this.config.interruption.visualFeedback.enabled &&
-              this.config.interruption.visualFeedback.useColors) {
-            const prefix = this.config.interruption.visualFeedback.interruptPrefix || '🔴';
-            const suffix = this.config.interruption.visualFeedback.interruptSuffix || '🔴';
-            console.log(`${prefix} ${transcript} ${suffix}`);
-          } else {
-            console.log(`${transcript}`);
-          }
+          console.log(`${transcript}`);
         }
 
         // 保存到文件
@@ -187,7 +159,7 @@ class AudioTranscriber {
         mkdirSync(dirname(this.config.output.qaOutputFile), { recursive: true });
       }
 
-      // 初始化AI管理器（包括TTS初始化）
+      // 初始化AI管理器（包括TTS初始化和键盘监听初始化）
       await this.aiManager.initialize();
 
       // 初始化组件
@@ -214,13 +186,7 @@ class AudioTranscriber {
       }
       
       // 中断功能说明
-      if (this.config.interruption.enabled) {
-        if (this.config.interruption.immediateInterrupt) {
-          console.log(`⚡ 增强中断功能已启用: 在AI回答时一检测到声音就会立即中断`);
-        } else {
-          console.log(`⚡ 中断功能已启用: 在AI回答时说话可以打断AI`);
-        }
-      }
+      console.log(`⚡ 键盘中断功能已启用: 在AI回答时按下 Ctrl+T 可立即中断当前回答`);
       
       console.log('Press Ctrl+C to stop\n');
 
@@ -248,11 +214,9 @@ class AudioTranscriber {
     console.log('\n⏹️  Stopping transcription service...');
     this.isRunning = false;
 
-    // 停止TTS
-    if (this.config.tts.enabled && this.aiManager.ttsManager) {
-      this.aiManager.ttsManager.stopAll();
-      console.log('✅ TTS stopped');
-    }
+    // 清理AI管理器资源（包括TTS和键盘监听）
+    this.aiManager.cleanup();
+    console.log('✅ AI manager cleaned up');
 
     if (this.ffmpegProcess) {
       this.ffmpegProcess.kill('SIGTERM');

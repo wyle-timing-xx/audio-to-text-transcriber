@@ -4,6 +4,7 @@ import InterruptibleController from './interruption.js';
 import { createProvider } from './providers/index.js';
 import TTSManager from '../tts/tts-manager.js';
 import { getSystemPrompt } from './prompts/index.js';
+import { KeyboardListener } from '../utils/index.js';
 
 class AIManager {
   constructor(config) {
@@ -20,6 +21,9 @@ class AIManager {
     
     // 初始化TTS管理器
     this.ttsManager = new TTSManager(config);
+    
+    // 初始化键盘监听器
+    this.keyboardListener = new KeyboardListener();
   }
 
   // 初始化AI管理器
@@ -28,6 +32,16 @@ class AIManager {
     if (this.config.tts.enabled) {
       await this.ttsManager.initialize();
     }
+    
+    // 启动键盘监听
+    this.keyboardListener.startListening();
+    
+    // 注册Ctrl+T中断回调
+    this.keyboardListener.registerCallback('ctrl+t', () => {
+      if (this.isProcessing) {
+        this._interruptAIResponse();
+      }
+    });
   }
 
   // 将 fragment 添加到 buffer，并（可选）做 partial send（记录/上下文）
@@ -44,11 +58,8 @@ class AIManager {
     this.lastUserInputTime = Date.now();
     this.hasNewUserInput = true;
 
-    // 如果允许中断，且 AI 正在回答，则立即中断
-    if (this.config.interruption.enabled && this.isProcessing) {
-      // 立即中断当前回答，无需等待
-      this._interruptAIResponse();
-    }
+    // 注意：移除了基于音频检测的中断功能
+    // 现在中断只会通过键盘Ctrl+T触发
 
     // 如果启用了TTS，且配置为检测用户输入时中断TTS，则停止当前TTS
     if (this.config.tts.enabled && 
@@ -75,9 +86,9 @@ class AIManager {
   _interruptAIResponse() {
     if (!this.isProcessing) return;
     
-    console.log("\n\n🔄 检测到音频输入，立即中断当前 AI 回答...\n");
+    console.log("\n\n🔄 检测到中断信号 (Ctrl+T)，立即中断当前 AI 回答...\n");
     if (this.config.output.saveToFile) {
-      appendFileSync(this.config.output.qaOutputFile, "\n\n[中断：检测到音频输入]\n\n");
+      appendFileSync(this.config.output.qaOutputFile, "\n\n[中断：Ctrl+T 按键触发]\n\n");
     }
 
     // 中断当前的 AI 响应
@@ -87,8 +98,6 @@ class AIManager {
     if (this.config.tts.enabled) {
       this.ttsManager.stopAll();
     }
-    
-    // 此时不重置 isProcessing，因为 _onSilenceTimeout 中会等待静默后再处理新的问题
   }
 
   _resetSilenceTimer() {
@@ -233,6 +242,19 @@ class AIManager {
     }
     
     return partialAnswer;
+  }
+  
+  // 清理资源
+  cleanup() {
+    // 停止键盘监听
+    if (this.keyboardListener) {
+      this.keyboardListener.stopListening();
+    }
+    
+    // 停止TTS
+    if (this.ttsManager) {
+      this.ttsManager.stopAll();
+    }
   }
 }
 
