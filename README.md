@@ -151,26 +151,13 @@ npm start
 
 ### 🌐 多语言提示词支持
 
-新版本增加了基于语言的智能提示词系统：
+新版本增加了基于根目录 Markdown 文件的提示词系统：
 
-- **自动切换**: 系统会根据 `LANGUAGE` 环境变量自动选择中文或英文提示词
-- **优化交互**: 针对不同语言环境优化 AI 行为，提供更自然的对话体验
-- **灵活配置**: 用户仍可通过 `AI_SYSTEM_PROMPT` 环境变量自定义提示词
-- **模块化设计**: 提示词保存在独立文件中，便于维护和扩展
-
-#### 语言切换流程
-
-1. 系统读取 `LANGUAGE` 环境变量（默认为 'en'）
-2. 基于语言选择相应的提示词文件（`prompt_zh.js` 或 `prompt_en.js`）
-3. 如果用户在 `.env` 中设置了自定义提示词，则优先使用用户自定义提示词
-4. AI 根据选定的语言提示词与用户交互
-
-#### 自定义提示词
-
-如果你想自定义 AI 提示词，可以：
-
-1. 直接在 `.env` 文件中设置 `AI_SYSTEM_PROMPT` 变量
-2. 或修改 `src/ai/prompts` 目录下的相应语言提示词文件
+- **文件读取**：从根目录的 `Prompt_zh.md` 和 `Prompt_en.md` 文件读取提示词
+- **自动切换**：根据 `LANGUAGE` 环境变量自动选择对应语言的提示词
+- **优先级处理**：用户设置的自定义提示词 (`AI_SYSTEM_PROMPT`) 优先级更高
+- **灵活编辑**：用户可以直接编辑 Markdown 文件来自定义提示词，无需修改代码
+- **自动初始化**：首次运行时会自动创建默认提示词文件
 
 ### 配置 AI 对话
 
@@ -314,6 +301,8 @@ TTS_INTERRUPT_ON_USER_INPUT=true     # 在检测到用户输入时中断当前TT
 
 ```
 audio-to-text-transcriber/
+├── Prompt_en.md            # 英文提示词文件
+├── Prompt_zh.md            # 中文提示词文件
 ├── src/                    # 源代码目录
 │   ├── index.js            # 主入口文件
 │   ├── config/             # 配置模块
@@ -323,16 +312,18 @@ audio-to-text-transcriber/
 │   │   ├── index.js        # AI 模块导出
 │   │   ├── ai-manager.js   # AI 对话管理
 │   │   ├── interruption.js # 中断控制器
-│   │   ├── prompts/        # 多语言提示词目录
+│   │   ├── prompts/        # 多语言提示词模块
 │   │   │   ├── index.js        # 提示词管理
-│   │   │   ├── prompt_zh.js    # 中文提示词
-│   │   │   └── prompt_en.js    # 英文提示词
+│   │   │   ├── prompt_zh.js    # 中文提示词加载器
+│   │   │   └── prompt_en.js    # 英文提示词加载器
 │   │   └── providers/      # AI 提供商实现
 │   │       ├── index.js        # 提供商工厂
 │   │       ├── base-provider.js # AI 提供商基类
 │   │       ├── openai.js        # OpenAI 实现
 │   │       ├── claude.js        # Claude 实现
 │   │       └── deepseek.js      # Deepseek 实现
+│   ├── scripts/            # 脚本目录
+│   │   └── setup-root-prompts.js # 提示词文件初始化脚本
 │   ├── utils/              # 工具模块
 │   │   ├── index.js        # 工具函数导出
 │   │   └── stream-utils.js # 流处理工具
@@ -371,10 +362,10 @@ audio-to-text-transcriber/
 
 系统根据 `LANGUAGE` 环境变量自动选择对应的提示词：
 
-1. **读取配置**：从 `.env` 文件读取 `LANGUAGE` 设置
-2. **选择提示词**：系统自动从 `src/ai/prompts` 目录选择对应语言的提示词文件
-3. **优先级处理**：如果用户设置了自定义提示词，优先使用自定义提示词
-4. **应用提示词**：AI 使用选定的提示词与用户交互，提供更自然的语言体验
+1. **读取配置**：从 `.env` 文件读取 `LANGUAGE` 设置（默认为 'en'）
+2. **加载提示词**：`prompt_zh.js` 和 `prompt_en.js` 直接从根目录读取对应的 Markdown 文件
+3. **优先级处理**：如果用户设置了 `AI_SYSTEM_PROMPT`，优先使用自定义提示词
+4. **应用提示词**：AI 使用选定的提示词与用户交互，提供更自然的对话体验
 
 ### 中断机制详解
 
