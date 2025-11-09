@@ -17,6 +17,7 @@
 - 📊 **时间戳**：每条转录都带有精确时间戳
 - 🎛️ **灵活配置**：通过环境变量轻松自定义
 - 🧩 **模块化架构**：代码重构为模块化设计，便于维护和扩展
+- 🌐 **多语言提示词**：根据转录语言自动切换提示词，提供更自然的交互体验
 
 ## 📋 前置要求
 
@@ -82,7 +83,7 @@ cp .env.example .env
 # 必填项
 DEEPGRAM_API_KEY=your_deepgram_api_key_here
 AUDIO_DEVICE=BlackHole 2ch:1
-LANGUAGE=zh
+LANGUAGE=zh         # 可设置为 zh 或 en，会自动使用对应语言的系统提示词
 
 # AI 对话功能（可选）
 AI_PROVIDER=openai           # 选择: openai | claude | deepseek
@@ -148,6 +149,29 @@ npm start
 
 这种增强的中断机制使对话更加自然流畅，类似于人类之间的对话方式。
 
+### 🌐 多语言提示词支持
+
+新版本增加了基于语言的智能提示词系统：
+
+- **自动切换**: 系统会根据 `LANGUAGE` 环境变量自动选择中文或英文提示词
+- **优化交互**: 针对不同语言环境优化 AI 行为，提供更自然的对话体验
+- **灵活配置**: 用户仍可通过 `AI_SYSTEM_PROMPT` 环境变量自定义提示词
+- **模块化设计**: 提示词保存在独立文件中，便于维护和扩展
+
+#### 语言切换流程
+
+1. 系统读取 `LANGUAGE` 环境变量（默认为 'en'）
+2. 基于语言选择相应的提示词文件（`prompt_zh.js` 或 `prompt_en.js`）
+3. 如果用户在 `.env` 中设置了自定义提示词，则优先使用用户自定义提示词
+4. AI 根据选定的语言提示词与用户交互
+
+#### 自定义提示词
+
+如果你想自定义 AI 提示词，可以：
+
+1. 直接在 `.env` 文件中设置 `AI_SYSTEM_PROMPT` 变量
+2. 或修改 `src/ai/prompts` 目录下的相应语言提示词文件
+
 ### 配置 AI 对话
 
 在 `.env` 文件中设置以下参数：
@@ -170,7 +194,7 @@ DEEPSEEK_MODEL=deepseek-chat
 # 静默检测时间（毫秒）- 判断用户是否已提问完毕
 SILENCE_TIMEOUT_MS=1500
 
-# AI 系统提示词
+# AI 系统提示词（可选，默认会根据 LANGUAGE 选择相应的提示词）
 AI_SYSTEM_PROMPT="你是智能问答助手，请简洁、准确地回答用户问题。"
 
 # 启用增量上报（实时将部分转录发送给 AI）
@@ -257,6 +281,31 @@ INTERRUPT_VISUAL_FEEDBACK=true       # 是否启用中断视觉反馈
 INTERRUPT_USE_COLORS=true            # 使用彩色标记突出显示中断
 INTERRUPT_PREFIX=🔴                   # 中断时的前缀标记
 INTERRUPT_SUFFIX=🔴                   # 中断时的后缀标记
+
+# 语音合成配置
+TTS_ENABLED=true                     # 是否启用语音合成
+TTS_PROVIDER=elevenlabs              # 语音合成提供商 (elevenlabs)
+
+# ElevenLabs 配置
+ELEVENLABS_API_KEY=your_elevenlabs_key
+ELEVENLABS_VOICE_ID=your_voice_id_here  # 声音ID，可以是预设声音或克隆的声音
+ELEVENLABS_MODEL_ID=eleven_multilingual_v2  # 模型ID
+ELEVENLABS_STABILITY=0.5             # 稳定性参数 (0-1)
+ELEVENLABS_SIMILARITY_BOOST=0.75     # 相似度提升参数 (0-1)
+ELEVENLABS_STYLE=0                   # 风格强度参数 (0-1)
+ELEVENLABS_SPEAKER_BOOST=true        # 是否启用说话者增强
+
+# ElevenLabs 提示词配置
+ELEVENLABS_USE_PROMPT=true           # 是否使用提示词
+ELEVENLABS_PROMPT_TEXT="以下是一个友好、自然的对话回答，语调轻松且有亲切感"  # 提示词文本
+
+# 语音输出设备
+TTS_OUTPUT_DEVICE=default            # 音频输出设备
+
+# 语音合成行为配置
+TTS_AUTO_PLAY_ANSWERS=true           # 是否自动播放AI回答
+TTS_MAX_TEXT_LENGTH=500              # 单次合成的最大文本长度
+TTS_INTERRUPT_ON_USER_INPUT=true     # 在检测到用户输入时中断当前TTS播放
 ```
 
 ## 📁 项目结构
@@ -274,6 +323,10 @@ audio-to-text-transcriber/
 │   │   ├── index.js        # AI 模块导出
 │   │   ├── ai-manager.js   # AI 对话管理
 │   │   ├── interruption.js # 中断控制器
+│   │   ├── prompts/        # 多语言提示词目录
+│   │   │   ├── index.js        # 提示词管理
+│   │   │   ├── prompt_zh.js    # 中文提示词
+│   │   │   └── prompt_en.js    # 英文提示词
 │   │   └── providers/      # AI 提供商实现
 │   │       ├── index.js        # 提供商工厂
 │   │       ├── base-provider.js # AI 提供商基类
@@ -283,6 +336,8 @@ audio-to-text-transcriber/
 │   ├── utils/              # 工具模块
 │   │   ├── index.js        # 工具函数导出
 │   │   └── stream-utils.js # 流处理工具
+│   ├── tts/                # 语音合成模块
+│   │   └── tts-manager.js  # TTS 管理器
 │   └── transcription/      # 转录模块
 │       ├── index.js        # 转录模块导出
 │       └── audio-transcriber.js # 音频转录器
@@ -311,6 +366,15 @@ audio-to-text-transcriber/
 4. **💬 流式回答** → AI 回答实时流式显示在控制台（所有提供商均支持）
 5. **⚡ 中断检测** → 持续监听新的音频输入，检测到语音立即中断 AI 回答
 6. **📝 记录保存** → 问答对话保存到文件（默认 `transcripts/qa_output.txt`）
+
+### 多语言提示词机制
+
+系统根据 `LANGUAGE` 环境变量自动选择对应的提示词：
+
+1. **读取配置**：从 `.env` 文件读取 `LANGUAGE` 设置
+2. **选择提示词**：系统自动从 `src/ai/prompts` 目录选择对应语言的提示词文件
+3. **优先级处理**：如果用户设置了自定义提示词，优先使用自定义提示词
+4. **应用提示词**：AI 使用选定的提示词与用户交互，提供更自然的语言体验
 
 ### 中断机制详解
 
